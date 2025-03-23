@@ -1,5 +1,0 @@
-include README.md
-include LICENSE
-recursive-include eqsignalpy *.py
-recursive-include docs *.md
-recursive-include examples *.py 
