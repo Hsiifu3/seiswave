@@ -18,7 +18,7 @@ EQSignalPy是对EQSignal库的Python封装，提供了地震信号处理的各�
 
 ```bash
 # 克隆仓库
-git clone https://github.com/你的用户名/eqsignalpy.git
+git clone https://github.com/hsiifu3/eqsignalpy.git
 
 # 进入项目目录
 cd eqsignalpy
@@ -129,9 +129,6 @@ plt.show()
 4. 推送到分支 (`git push origin feature/amazing-feature`)
 5. 提交Pull Request
 
-## 许可证
-
-本项目采用与原EQSignal项目相同的许可证授权。
 
 ## 致谢
 
