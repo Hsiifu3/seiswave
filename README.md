@@ -1,10 +1,10 @@
-# EQSignalPy
+# SeisWave
 
 **地震信号处理与选波工具包 / Seismic Signal Processing & Wave Selection Toolkit**
 
-EQSignalPy 是一个用 Python 编写的地震工程工具包，提供地震信号处理、反应谱计算、规范谱生成、地震波选取和人工波生成等功能。v2.0 基于 EQSignal C++ 库完全重写，并附带 PySide6 桌面 GUI 应用。
+SeisWave 是一个用 Python 编写的地震工程工具包，提供地震信号处理、反应谱计算、规范谱生成、地震波选取和人工波生成等功能。v2.0 基于 EQSignal C++ 库完全重写，并附带 PySide6 桌面 GUI 应用。
 
-EQSignalPy is a Python toolkit for earthquake engineering, providing seismic signal processing, response spectrum computation, code-based design spectrum generation, ground motion selection, and artificial wave generation. v2.0 is a complete rewrite based on the EQSignal C++ library, with a PySide6 desktop GUI.
+SeisWave is a Python toolkit for earthquake engineering, providing seismic signal processing, response spectrum computation, code-based design spectrum generation, ground motion selection, and artificial wave generation. v2.0 is a complete rewrite based on the EQSignal C++ library, with a PySide6 desktop GUI.
 
 ---
 
@@ -50,7 +50,7 @@ pip install -e ".[gui]"
 ### 加载地震记录 / Load a seismic record
 
 ```python
-from eqsignalpy import FileIO, EQSignal
+from seiswave import FileIO, EQSignal
 
 # 从 AT2 文件加载 / Load from AT2 file
 record = FileIO.read_at2("RSN96_MANAGUA_B-ESO090-Acc.txt")
@@ -65,7 +65,7 @@ print(f"Duration = {eq.duration:.2f} s")
 ### 计算反应谱 / Compute response spectrum
 
 ```python
-from eqsignalpy import Spectra
+from seiswave import Spectra
 
 periods = Spectra.default_periods()
 sa = Spectra.newmark_beta(eq.acc, eq.dt, periods, zeta=0.05)
@@ -74,7 +74,7 @@ sa = Spectra.newmark_beta(eq.acc, eq.dt, periods, zeta=0.05)
 ### 生成规范谱 / Generate code design spectrum
 
 ```python
-from eqsignalpy import CodeSpectrum
+from seiswave import CodeSpectrum
 
 # GB 50011: 8度(0.2g)、第一组、II类场地、多遇
 spec = CodeSpectrum.gb50011(
@@ -85,7 +85,7 @@ spec = CodeSpectrum.gb50011(
 ### 生成人工波 / Generate artificial wave
 
 ```python
-from eqsignalpy import WaveGenerator, Spectra
+from seiswave import WaveGenerator, Spectra
 import numpy as np
 
 periods = Spectra.default_periods()
@@ -103,10 +103,10 @@ wave = WaveGenerator.generate(
 
 ```bash
 # 方式一：模块启动 / Module entry
-python -m eqsignalpy
+python -m seiswave
 
 # 方式二：命令行入口（安装后）/ Console entry (after install)
-eqsignalpy
+seiswave
 ```
 
 ---
@@ -114,8 +114,8 @@ eqsignalpy
 ## 项目结构 / Project Structure
 
 ```
-eqsignalpy/
-├── eqsignalpy/
+seiswave/
+├── seiswave/
 │   ├── __init__.py          # 包入口，导出核心类
 │   ├── __main__.py          # GUI 启动入口
 │   ├── core/                # 核心计算库（无 GUI 依赖）

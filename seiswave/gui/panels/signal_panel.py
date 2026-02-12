@@ -12,9 +12,9 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Signal, Qt
 
-from eqsignalpy.core import EQSignal, Filter
-from eqsignalpy.gui.widgets.plot_widget import PlotWidget
-from eqsignalpy.gui.styles import get_mpl_colors
+from seiswave.core import EQSignal, Filter
+from seiswave.gui.widgets.plot_widget import PlotWidget
+from seiswave.gui.styles import get_mpl_colors
 
 
 class SignalPanel(QWidget):

@@ -1,5 +1,5 @@
 """
-EQSignalPy 核心计算库
+SeisWave 核心计算库
 
 纯 Python 实现，无 GUI 依赖。
 """

@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-EQSignalPy PyInstaller spec file
+SeisWave PyInstaller spec file
 Build: python -m PyInstaller build.spec
 """
 
@@ -14,7 +14,7 @@ block_cipher = None
 ROOT = os.path.abspath(os.path.dirname(SPECPATH if 'SPECPATH' in dir() else '.'))
 
 a = Analysis(
-    [os.path.join(ROOT, 'eqsignalpy', '__main__.py')],
+    [os.path.join(ROOT, 'seiswave', '__main__.py')],
     pathex=[ROOT],
     binaries=[],
     datas=[],
@@ -42,34 +42,34 @@ a = Analysis(
         'PySide6.QtGui',
         'PySide6.QtWidgets',
         'PySide6.QtSvg',
-        # EQSignalPy modules
-        'eqsignalpy',
-        'eqsignalpy.core',
-        'eqsignalpy.core.signal',
-        'eqsignalpy.core.spectrum',
-        'eqsignalpy.core.filter',
-        'eqsignalpy.core.generator',
-        'eqsignalpy.core.io',
-        'eqsignalpy.core.code_spec',
-        'eqsignalpy.core.selector',
-        'eqsignalpy.core.fft',
-        'eqsignalpy.core.response',
-        'eqsignalpy.gui',
-        'eqsignalpy.gui.main_window',
-        'eqsignalpy.gui.styles',
-        'eqsignalpy.gui.workers',
-        'eqsignalpy.gui.panels',
-        'eqsignalpy.gui.panels.spectrum_panel',
-        'eqsignalpy.gui.panels.import_panel',
-        'eqsignalpy.gui.panels.selector_panel',
-        'eqsignalpy.gui.panels.generator_panel',
-        'eqsignalpy.gui.panels.signal_panel',
-        'eqsignalpy.gui.panels.result_panel',
-        'eqsignalpy.gui.widgets',
-        'eqsignalpy.gui.widgets.plot_widget',
-        'eqsignalpy.gui.widgets.spectrum_plot',
-        'eqsignalpy.gui.widgets.wave_table',
-        'eqsignalpy.gui.widgets.progress_dialog',
+        # SeisWave modules
+        'seiswave',
+        'seiswave.core',
+        'seiswave.core.signal',
+        'seiswave.core.spectrum',
+        'seiswave.core.filter',
+        'seiswave.core.generator',
+        'seiswave.core.io',
+        'seiswave.core.code_spec',
+        'seiswave.core.selector',
+        'seiswave.core.fft',
+        'seiswave.core.response',
+        'seiswave.gui',
+        'seiswave.gui.main_window',
+        'seiswave.gui.styles',
+        'seiswave.gui.workers',
+        'seiswave.gui.panels',
+        'seiswave.gui.panels.spectrum_panel',
+        'seiswave.gui.panels.import_panel',
+        'seiswave.gui.panels.selector_panel',
+        'seiswave.gui.panels.generator_panel',
+        'seiswave.gui.panels.signal_panel',
+        'seiswave.gui.panels.result_panel',
+        'seiswave.gui.widgets',
+        'seiswave.gui.widgets.plot_widget',
+        'seiswave.gui.widgets.spectrum_plot',
+        'seiswave.gui.widgets.wave_table',
+        'seiswave.gui.widgets.progress_dialog',
     ],
     hookspath=[],
     hooksconfig={},
@@ -124,7 +124,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='EQSignalPy',
+    name='SeisWave',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -146,19 +146,19 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='EQSignalPy',
+    name='SeisWave',
 )
 
 # macOS app bundle
 if sys.platform == 'darwin':
     app = BUNDLE(
         coll,
-        name='EQSignalPy.app',
+        name='SeisWave.app',
         icon=icon_file,
-        bundle_identifier='com.eqsignalpy.app',
+        bundle_identifier='com.seiswave.app',
         info_plist={
-            'CFBundleName': 'EQSignalPy',
-            'CFBundleDisplayName': 'EQSignalPy',
+            'CFBundleName': 'SeisWave',
+            'CFBundleDisplayName': 'SeisWave',
             'CFBundleVersion': '2.0.0',
             'CFBundleShortVersionString': '2.0.0',
             'NSHighResolutionCapable': True,

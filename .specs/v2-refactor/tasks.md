@@ -1,4 +1,4 @@
-# EQSignalPy v2 - 实现计划
+# SeisWave v2 - 实现计划
 
 ## 任务列表
 
@@ -6,14 +6,14 @@
 
 #### Task 1: 项目结构重组 + IO 模块
 - **描述**：重组目录结构为 `core/` + `gui/`，实现 `core/io.py` 文件读写模块（AT2 新旧格式、txt 单列/双列、csv、批量加载）
-- **文件**：`eqsignalpy/core/__init__.py`, `eqsignalpy/core/io.py`, `eqsignalpy/__init__.py`, `setup.py`
+- **文件**：`seiswave/core/__init__.py`, `seiswave/core/io.py`, `seiswave/__init__.py`, `setup.py`
 - **验收标准**：AC-2.1, AC-2.2, AC-2.3
 - **预估**：中等
 - **状态**：✅ 完成（2026-02-11，手动补完 io.py + response.py 恢复）
 
 #### Task 2: EQSignal 核心类重写
 - **描述**：重写 `core/signal.py`，融合 EQSignal C++ 的 API 设计。包含：加速度/速度/位移积分、PGA/持时/有效持时属性、归一化/缩放、裁剪（手动+自动 Arias）、重采样
-- **文件**：`eqsignalpy/core/signal.py`
+- **文件**：`seiswave/core/signal.py`
 - **验收标准**：AC-6.3, AC-6.4
 - **依赖**：Task 1
 - **预估**：中等
@@ -21,7 +21,7 @@
 
 #### Task 3: 滤波与基线校正
 - **描述**：实现 `core/filter.py`，包含多项式去趋势（1~6阶）、双线性去趋势（移植 EQSignal bilinearDetrend）、Butterworth 带通/低通/高通滤波
-- **文件**：`eqsignalpy/core/filter.py`
+- **文件**：`seiswave/core/filter.py`
 - **验收标准**：AC-6.1, AC-6.2
 - **依赖**：Task 2
 - **预估**：中等
@@ -29,7 +29,7 @@
 
 #### Task 4: 反应谱计算
 - **描述**：重写 `core/spectrum.py`，实现 Newmark-β 法、频域法、混合法三种反应谱计算。周期数组支持对数/线性/混合分布（同 EQSignal）。NumPy 向量化优化性能
-- **文件**：`eqsignalpy/core/spectrum.py`
+- **文件**：`seiswave/core/spectrum.py`
 - **验收标准**：AC-4.1, AC-4.2, AC-4.3
 - **依赖**：Task 2
 - **预估**：复杂
@@ -37,7 +37,7 @@
 
 #### Task 5: FFT / PSD
 - **描述**：实现 `core/fft.py`，傅里叶振幅谱和 Welch 功率谱密度
-- **文件**：`eqsignalpy/core/fft.py`
+- **文件**：`seiswave/core/fft.py`
 - **验收标准**：AC-7.1, AC-7.2
 - **依赖**：Task 2
 - **预估**：简单
@@ -45,7 +45,7 @@
 
 #### Task 6: 规范反应谱
 - **描述**：实现 `core/code_spec.py`，移植 EQSignal C++ 的 7 种规范谱 + MATLAB 的隔震谱。包含 GB 50011 完整参数表（烈度×分组×场地→Tg、α_max）
-- **文件**：`eqsignalpy/core/code_spec.py`
+- **文件**：`seiswave/core/code_spec.py`
 - **验收标准**：AC-1.1, AC-1.2, AC-1.3, AC-1.4
 - **依赖**：Task 4
 - **预估**：复杂
@@ -53,7 +53,7 @@
 
 #### Task 7: 选波引擎
 - **描述**：实现 `core/selector.py`，移植 MATLAB 的三步筛选逻辑（有效持时→主周期偏差→底部剪力校核）。包含选波报告生成和文件导出
-- **文件**：`eqsignalpy/core/selector.py`
+- **文件**：`seiswave/core/selector.py`
 - **验收标准**：AC-3.1, AC-3.2, AC-3.3, AC-3.4
 - **依赖**：Task 4, Task 6
 - **预估**：复杂
@@ -61,7 +61,7 @@
 
 #### Task 8: 人工波生成
 - **描述**：实现 `core/generator.py`，移植 EQSignal C++ 的 fitSP 迭代谱拟合算法。包含白噪声初始化、包络函数、频域谱调整、收敛判断
-- **文件**：`eqsignalpy/core/generator.py`
+- **文件**：`seiswave/core/generator.py`
 - **验收标准**：AC-5.1, AC-5.2, AC-5.3
 - **依赖**：Task 4, Task 6
 - **预估**：复杂
@@ -79,14 +79,14 @@
 
 #### Task 10: GUI 框架搭建
 - **描述**：搭建 PySide6 主窗口框架（菜单栏、工具栏、左侧参数面板、中央绘图区、底部状态栏），实现 Matplotlib 嵌入控件和后台计算线程基础设施
-- **文件**：`eqsignalpy/gui/main_window.py`, `eqsignalpy/gui/widgets/plot_widget.py`, `eqsignalpy/gui/workers.py`, `eqsignalpy/__main__.py`
+- **文件**：`seiswave/gui/main_window.py`, `seiswave/gui/widgets/plot_widget.py`, `seiswave/gui/workers.py`, `seiswave/__main__.py`
 - **验收标准**：AC-8.1, AC-8.4
 - **预估**：中等
 - **状态**：✅ 完成（2026-02-12，PySide6 主窗口框架含菜单栏/工具栏/StackedWidget 面板切换/状态栏。PlotWidget 嵌入 Matplotlib Canvas 带工具栏。workers.py 含 BaseWorker/SpectrumWorker/BatchSpectrumWorker/SelectionWorker/GeneratorWorker。styles.py 深色/浅色双主题。__main__.py 入口点。GUI 启动验证通过）
 
 #### Task 11: 规范谱面板
 - **描述**：实现规范谱设置面板（规范选择、烈度、场地类别、阻尼比、隔震开关），实时预览规范谱曲线
-- **文件**：`eqsignalpy/gui/panels/spectrum_panel.py`
+- **文件**：`seiswave/gui/panels/spectrum_panel.py`
 - **验收标准**：AC-1.5, AC-8.2
 - **依赖**：Task 10
 - **预估**：中等
@@ -94,7 +94,7 @@
 
 #### Task 12: 数据导入面板
 - **描述**：实现数据导入面板（目录选择、文件列表、预览时程曲线、PGA/持时信息显示）
-- **文件**：`eqsignalpy/gui/panels/import_panel.py`, `eqsignalpy/gui/widgets/wave_table.py`
+- **文件**：`seiswave/gui/panels/import_panel.py`, `seiswave/gui/widgets/wave_table.py`
 - **验收标准**：AC-2.4, AC-8.2
 - **依赖**：Task 10
 - **预估**：中等
@@ -102,7 +102,7 @@
 
 #### Task 13: 选波面板
 - **描述**：实现选波参数面板（结构周期输入、筛选条件设置、执行选波、结果列表、反应谱对比图）
-- **文件**：`eqsignalpy/gui/panels/selector_panel.py`
+- **文件**：`seiswave/gui/panels/selector_panel.py`
 - **验收标准**：AC-3.2, AC-3.3, AC-8.2
 - **依赖**：Task 10
 - **预估**：复杂
@@ -110,7 +110,7 @@
 
 #### Task 14: 人工波生成面板 + 信号处理面板
 - **描述**：实现人工波生成面板（目标谱选择、参数设置、迭代过程可视化）和信号处理面板（基线校正、滤波参数）
-- **文件**：`eqsignalpy/gui/panels/generator_panel.py`, `eqsignalpy/gui/panels/signal_panel.py`
+- **文件**：`seiswave/gui/panels/generator_panel.py`, `seiswave/gui/panels/signal_panel.py`
 - **验收标准**：AC-5.3, AC-5.4, AC-8.2
 - **依赖**：Task 10
 - **预估**：中等
@@ -118,7 +118,7 @@
 
 #### Task 15: 导出与报告
 - **描述**：实现导出功能（时程数据、反应谱数据、图片）和选波报告生成（HTML/PDF）
-- **文件**：`eqsignalpy/gui/panels/result_panel.py`
+- **文件**：`seiswave/gui/panels/result_panel.py`
 - **验收标准**：AC-9.1, AC-9.2, AC-9.3
 - **依赖**：Task 13
 - **预估**：中等

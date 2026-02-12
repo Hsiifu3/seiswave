@@ -1,5 +1,5 @@
 """
-EQSignalPy GUI 样式表 - 深色/浅色主题
+SeisWave GUI 样式表 - 深色/浅色主题
 
 现代学术科研风格
 """

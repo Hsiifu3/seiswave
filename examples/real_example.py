@@ -1,11 +1,11 @@
 """
-使用EQSignalPy处理实际地震记录的示例
+使用SeisWave处理实际地震记录的示例
 """
 
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-from eqsignalpy import EQSignal, EQSpectra, Filter, Response
+from seiswave import EQSignal, EQSpectra, Filter, Response
 
 def main():
     # 从文件加载地震记录

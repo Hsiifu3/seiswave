@@ -57,7 +57,7 @@ class SpectrumWorker(BaseWorker):
         self._method = method
 
     def execute(self):
-        from eqsignalpy.core import Spectra
+        from seiswave.core import Spectra
         return Spectra.compute(
             self._signal.acc, self._signal.dt,
             self._periods, self._zeta, self._method,
@@ -75,7 +75,7 @@ class BatchSpectrumWorker(BaseWorker):
         self._method = method
 
     def execute(self):
-        from eqsignalpy.core import Spectra
+        from seiswave.core import Spectra
         results = []
         total = len(self._signals)
         for i, sig in enumerate(self._signals):
@@ -123,7 +123,7 @@ class GeneratorWorker(BaseWorker):
         self._max_iter = max_iter
 
     def execute(self):
-        from eqsignalpy.core import WaveGenerator
+        from seiswave.core import WaveGenerator
 
         def progress_cb(pct, msg):
             if self.is_cancelled:

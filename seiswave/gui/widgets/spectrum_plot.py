@@ -5,8 +5,8 @@
 """
 
 import numpy as np
-from eqsignalpy.gui.widgets.plot_widget import PlotWidget
-from eqsignalpy.gui.styles import get_mpl_colors
+from seiswave.gui.widgets.plot_widget import PlotWidget
+from seiswave.gui.styles import get_mpl_colors
 
 
 class SpectrumPlot(PlotWidget):

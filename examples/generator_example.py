@@ -4,7 +4,7 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-from eqsignalpy import EQGenerator, EQSignal
+from seiswave import EQGenerator, EQSignal
 
 def main():
     """演示地震动生成功能"""

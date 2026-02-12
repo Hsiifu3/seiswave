@@ -12,12 +12,12 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Signal
 
-from eqsignalpy.core import WaveGenerator, Spectra
-from eqsignalpy.gui.widgets.spectrum_plot import SpectrumPlot
-from eqsignalpy.gui.widgets.plot_widget import PlotWidget
-from eqsignalpy.gui.widgets.progress_dialog import ProgressDialog
-from eqsignalpy.gui.workers import GeneratorWorker
-from eqsignalpy.gui.styles import get_mpl_colors
+from seiswave.core import WaveGenerator, Spectra
+from seiswave.gui.widgets.spectrum_plot import SpectrumPlot
+from seiswave.gui.widgets.plot_widget import PlotWidget
+from seiswave.gui.widgets.progress_dialog import ProgressDialog
+from seiswave.gui.workers import GeneratorWorker
+from seiswave.gui.styles import get_mpl_colors
 
 
 class GeneratorPanel(QWidget):

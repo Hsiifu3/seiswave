@@ -14,11 +14,11 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Signal, Qt
 
-from eqsignalpy.core import WaveSelector, SelectionCriteria, Spectra, CodeSpectrum
-from eqsignalpy.gui.widgets.spectrum_plot import SpectrumPlot
-from eqsignalpy.gui.widgets.progress_dialog import ProgressDialog
-from eqsignalpy.gui.workers import SelectionWorker, BatchSpectrumWorker
-from eqsignalpy.gui.styles import get_mpl_colors
+from seiswave.core import WaveSelector, SelectionCriteria, Spectra, CodeSpectrum
+from seiswave.gui.widgets.spectrum_plot import SpectrumPlot
+from seiswave.gui.widgets.progress_dialog import ProgressDialog
+from seiswave.gui.workers import SelectionWorker, BatchSpectrumWorker
+from seiswave.gui.styles import get_mpl_colors
 
 
 class SelectorPanel(QWidget):

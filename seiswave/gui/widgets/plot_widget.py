@@ -12,7 +12,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolb
 from matplotlib.figure import Figure
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
-from eqsignalpy.gui.styles import get_mpl_colors
+from seiswave.gui.styles import get_mpl_colors
 
 # 配置中文字体
 plt.rcParams['font.sans-serif'] = ['Hiragino Sans GB', 'Heiti TC', 'Songti SC', 'SimHei', 'DejaVu Sans']
