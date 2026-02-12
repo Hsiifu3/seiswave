@@ -1,13 +1,29 @@
 """
-EQSignalPy库 - 地震信号处理工具包
+EQSignalPy - 地震信号处理与选波工具包
 
-这个库封装了EQSignal的功能，提供了一组用于地震信号处理的工具。
+核心计算库 + GUI 桌面应用
 """
 
-from .signal import EQSignal
-from .spectrum import EQSpectra
-from .response import Response
-from .filter import Filter
-from .generator import EQGenerator
+from .core import (
+    EQSignal, Spectra, Filter, WaveGenerator,
+    FileIO, EQRecord, CodeSpectrum,
+    WaveSelector, SelectionCriteria, SelectionResult,
+    FFT, Response,
+)
 
-__version__ = "0.1.0" 
+__version__ = "2.0.0"
+
+__all__ = [
+    'EQSignal',
+    'Spectra',
+    'Filter',
+    'WaveGenerator',
+    'FileIO',
+    'EQRecord',
+    'CodeSpectrum',
+    'WaveSelector',
+    'SelectionCriteria',
+    'SelectionResult',
+    'FFT',
+    'Response',
+]
