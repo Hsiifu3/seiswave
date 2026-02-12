@@ -1,10 +1,10 @@
 """
-EQSignalPy基本使用示例
+SeisWave基本使用示例
 """
 
 import numpy as np
 import matplotlib.pyplot as plt
-from eqsignalpy import EQSignal, EQSpectra, Filter
+from seiswave import EQSignal, EQSpectra, Filter
 
 # 创建一个简单的人工地震记录
 def create_artificial_eq_record(n=2000, dt=0.01):

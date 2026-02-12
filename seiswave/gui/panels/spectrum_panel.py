@@ -12,8 +12,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Signal
 
-from eqsignalpy.core import CodeSpectrum, Spectra
-from eqsignalpy.gui.widgets.spectrum_plot import SpectrumPlot
+from seiswave.core import CodeSpectrum, Spectra
+from seiswave.gui.widgets.spectrum_plot import SpectrumPlot
 
 
 class SpectrumPanel(QWidget):
@@ -178,7 +178,7 @@ class SpectrumPanel(QWidget):
             self, "导出规范谱", "code_spectrum.csv", "CSV 文件 (*.csv)",
         )
         if path:
-            from eqsignalpy.core import FileIO
+            from seiswave.core import FileIO
             FileIO.write_csv(path, T=self._periods, Sa=self._current_sa)
 
     def get_spectrum(self):

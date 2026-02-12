@@ -1,5 +1,5 @@
 """
-EQSignalPy 主窗口
+SeisWave 主窗口
 
 菜单栏、工具栏、左侧参数面板切换、中央绘图区、底部状态栏。
 """
@@ -12,22 +12,22 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 
-from eqsignalpy.gui.styles import get_theme
-from eqsignalpy.gui.panels.spectrum_panel import SpectrumPanel
-from eqsignalpy.gui.panels.import_panel import ImportPanel
-from eqsignalpy.gui.panels.selector_panel import SelectorPanel
-from eqsignalpy.gui.panels.generator_panel import GeneratorPanel
-from eqsignalpy.gui.panels.signal_panel import SignalPanel
-from eqsignalpy.gui.panels.result_panel import ResultPanel
+from seiswave.gui.styles import get_theme
+from seiswave.gui.panels.spectrum_panel import SpectrumPanel
+from seiswave.gui.panels.import_panel import ImportPanel
+from seiswave.gui.panels.selector_panel import SelectorPanel
+from seiswave.gui.panels.generator_panel import GeneratorPanel
+from seiswave.gui.panels.signal_panel import SignalPanel
+from seiswave.gui.panels.result_panel import ResultPanel
 
 
 class MainWindow(QMainWindow):
-    """EQSignalPy 主窗口"""
+    """SeisWave 主窗口"""
 
     def __init__(self):
         super().__init__()
         self._dark = False
-        self.setWindowTitle("EQSignalPy v2 - 地震信号处理与选波工具")
+        self.setWindowTitle("SeisWave v2 - 地震信号处理与选波工具")
         self.setMinimumSize(1200, 800)
         self.resize(1400, 900)
 
@@ -223,8 +223,8 @@ class MainWindow(QMainWindow):
     def _show_about(self):
         QMessageBox.about(
             self,
-            "关于 EQSignalPy",
-            "<h3>EQSignalPy v2.0</h3>"
+            "关于 SeisWave",
+            "<h3>SeisWave v2.0</h3>"
             "<p>地震信号处理与选波工具包</p>"
             "<p>基于 EQSignal C++ 和 MATLAB 选波程序重写</p>"
             "<p>核心功能：</p>"

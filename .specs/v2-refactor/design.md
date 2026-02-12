@@ -1,11 +1,11 @@
-# EQSignalPy v2 - 技术设计
+# SeisWave v2 - 技术设计
 
 ## 架构概览
 
-采用经典的 MVC 分层架构：核心计算库（Model）+ GUI 界面（View）+ 控制逻辑（Controller）。核心库保持纯 Python 可独立使用（`import eqsignalpy`），GUI 层基于 PySide6 提供 Windows 桌面体验。
+采用经典的 MVC 分层架构：核心计算库（Model）+ GUI 界面（View）+ 控制逻辑（Controller）。核心库保持纯 Python 可独立使用（`import seiswave`），GUI 层基于 PySide6 提供 Windows 桌面体验。
 
 ```
-eqsignalpy/
+seiswave/
 ├── core/              # 核心计算库（纯 Python，无 GUI 依赖）
 │   ├── signal.py      # 地震信号类（EQSignal）
 │   ├── spectrum.py    # 反应谱计算（Spectra）
@@ -463,20 +463,20 @@ pyinstaller>=6.0
 
 ## 影响范围
 
-### 保留的文件（从现有 eqsignalpy 重构）
-- `eqsignalpy/__init__.py` → 更新导出
-- `eqsignalpy/signal.py` → 重写为 `core/signal.py`
-- `eqsignalpy/spectrum.py` → 重写为 `core/spectrum.py`
-- `eqsignalpy/filter.py` → 重写为 `core/filter.py`
-- `eqsignalpy/generator.py` → 重写为 `core/generator.py`
+### 保留的文件（从现有 seiswave 重构）
+- `seiswave/__init__.py` → 更新导出
+- `seiswave/signal.py` → 重写为 `core/signal.py`
+- `seiswave/spectrum.py` → 重写为 `core/spectrum.py`
+- `seiswave/filter.py` → 重写为 `core/filter.py`
+- `seiswave/generator.py` → 重写为 `core/generator.py`
 
 ### 新增的文件
-- `eqsignalpy/core/code_spec.py` — 规范谱（核心新功能）
-- `eqsignalpy/core/selector.py` — 选波引擎（核心新功能）
-- `eqsignalpy/core/io.py` — 文件 I/O
-- `eqsignalpy/core/fft.py` — FFT/PSD
-- `eqsignalpy/gui/` — 整个 GUI 层（新增）
+- `seiswave/core/code_spec.py` — 规范谱（核心新功能）
+- `seiswave/core/selector.py` — 选波引擎（核心新功能）
+- `seiswave/core/io.py` — 文件 I/O
+- `seiswave/core/fft.py` — FFT/PSD
+- `seiswave/gui/` — 整个 GUI 层（新增）
 
 ### 删除的文件
-- `eqsignalpy/response.py` → 功能合并到 `spectrum.py`
+- `seiswave/response.py` → 功能合并到 `spectrum.py`
 - `examples/` → 重写为新的示例

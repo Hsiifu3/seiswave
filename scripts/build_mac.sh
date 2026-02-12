@@ -1,11 +1,11 @@
 #!/bin/bash
-# EQSignalPy macOS Build Script
+# SeisWave macOS Build Script
 # Usage: bash scripts/build_mac.sh
 
 set -e
 
 echo "============================================"
-echo " EQSignalPy macOS Build"
+echo " SeisWave macOS Build"
 echo "============================================"
 
 cd "$(dirname "$0")/.."
@@ -28,11 +28,11 @@ pip3 install -r requirements.txt
 pip3 install -e .
 
 # Build
-echo "[3/3] Building EQSignalPy..."
+echo "[3/3] Building SeisWave..."
 python3 -m PyInstaller build.spec --noconfirm --clean
 
 echo "============================================"
 echo " Build complete!"
-echo " Output: dist/EQSignalPy.app (macOS bundle)"
-echo "         dist/EQSignalPy/    (standalone dir)"
+echo " Output: dist/SeisWave.app (macOS bundle)"
+echo "         dist/SeisWave/    (standalone dir)"
 echo "============================================"

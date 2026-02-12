@@ -1,8 +1,8 @@
-# EQSignalPy v2 - 需求规格
+# SeisWave v2 - 需求规格
 
 ## 概述
 
-将 EQSignalPy 从基础地震信号处理库升级为完整的地震动选波与人工波生成工具，融合 Panchatantra/EQSignal（C++ 算法骨架）和用户 MATLAB 选波程序（GB 50011 规范谱 + PEER 选波流程），最终打包为 Windows 桌面应用程序。
+将 SeisWave 从基础地震信号处理库升级为完整的地震动选波与人工波生成工具，融合 Panchatantra/EQSignal（C++ 算法骨架）和用户 MATLAB 选波程序（GB 50011 规范谱 + PEER 选波流程），最终打包为 Windows 桌面应用程序。
 
 ## 用户故事
 

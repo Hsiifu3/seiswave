@@ -13,8 +13,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Signal, Qt
 
-from eqsignalpy.core import FileIO, Spectra
-from eqsignalpy.gui.styles import get_mpl_colors
+from seiswave.core import FileIO, Spectra
+from seiswave.gui.styles import get_mpl_colors
 
 
 class ResultPanel(QWidget):
@@ -274,7 +274,7 @@ class ResultPanel(QWidget):
 
         lines = [
             "=" * 60,
-            "EQSignalPy 选波报告",
+            "SeisWave 选波报告",
             "=" * 60,
             "",
             f"总计筛选: {total} 条地震波",

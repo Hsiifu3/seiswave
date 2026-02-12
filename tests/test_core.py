@@ -1,5 +1,5 @@
 """
-EQSignalPy v2 核心库测试
+SeisWave v2 核心库测试
 
 覆盖: IO, Signal, Spectrum, CodeSpec, Filter, FFT, Generator, Selector
 """
@@ -24,7 +24,7 @@ HAS_AT2 = os.path.isfile(SAMPLE_AT2)
 class TestFileIO:
     @pytest.mark.skipif(not HAS_AT2, reason="AT2 test file not found")
     def test_read_at2(self):
-        from eqsignalpy.core import FileIO
+        from seiswave.core import FileIO
         rec = FileIO.read_at2(SAMPLE_AT2)
         assert rec.dt == pytest.approx(0.005)
         assert rec.npts == 3317
@@ -32,7 +32,7 @@ class TestFileIO:
         assert rec.name == 'RSN121_FRIULI.A_A-BCS000'
 
     def test_write_read_at2_roundtrip(self):
-        from eqsignalpy.core import FileIO
+        from seiswave.core import FileIO
         acc = np.sin(np.linspace(0, 6 * np.pi, 500)) * 0.3
         dt = 0.01
         with tempfile.NamedTemporaryFile(suffix='.AT2', delete=False) as f:
@@ -47,7 +47,7 @@ class TestFileIO:
             os.unlink(path)
 
     def test_write_read_txt_single_col(self):
-        from eqsignalpy.core import FileIO
+        from seiswave.core import FileIO
         acc = np.random.randn(200)
         dt = 0.02
         with tempfile.NamedTemporaryFile(suffix='.txt', delete=False) as f:
@@ -64,7 +64,7 @@ class TestFileIO:
 
 class TestEQSignal:
     def test_basic_properties(self):
-        from eqsignalpy.core import EQSignal
+        from seiswave.core import EQSignal
         acc = np.array([0.0, 0.5, 1.0, -0.5, -1.0, 0.3])
         sig = EQSignal(acc, dt=0.02, name='test')
         assert sig.n == 6
@@ -73,7 +73,7 @@ class TestEQSignal:
         assert len(sig.time) == 6
 
     def test_a2vd_integration(self):
-        from eqsignalpy.core import EQSignal
+        from seiswave.core import EQSignal
         # Constant acceleration => linear velocity => quadratic displacement
         n = 100
         dt = 0.01
@@ -87,7 +87,7 @@ class TestEQSignal:
         assert sig.disp[-1] == pytest.approx(0.5 * 2.0 * t_end**2, rel=0.05)
 
     def test_normalize_and_scale(self):
-        from eqsignalpy.core import EQSignal
+        from seiswave.core import EQSignal
         acc = np.array([0.5, -2.0, 1.0, 0.3])
         sig = EQSignal(acc.copy(), dt=0.02)
         sig.normalize()
@@ -96,7 +96,7 @@ class TestEQSignal:
         assert sig.pga == pytest.approx(3.0)
 
     def test_effective_duration(self):
-        from eqsignalpy.core import EQSignal
+        from seiswave.core import EQSignal
         # Create signal with clear strong motion phase
         n = 2000
         dt = 0.01
@@ -112,7 +112,7 @@ class TestEQSignal:
         assert 5.0 < ed < 15.0
 
     def test_trim(self):
-        from eqsignalpy.core import EQSignal
+        from seiswave.core import EQSignal
         acc = np.arange(100, dtype=float)
         sig = EQSignal(acc, dt=0.01)
         sig.trim(10, 49)
@@ -121,7 +121,7 @@ class TestEQSignal:
 
     @pytest.mark.skipif(not HAS_AT2, reason="AT2 test file not found")
     def test_from_at2(self):
-        from eqsignalpy.core import EQSignal
+        from seiswave.core import EQSignal
         sig = EQSignal.from_at2(SAMPLE_AT2)
         assert sig.n == 3317
         assert sig.dt == pytest.approx(0.005)
@@ -132,7 +132,7 @@ class TestEQSignal:
 
 class TestSpectra:
     def test_default_periods_mixed(self):
-        from eqsignalpy.core import Spectra
+        from seiswave.core import Spectra
         p = Spectra.default_periods(0.04, 10.0, 200, mode='mixed')
         assert len(p) == 200
         assert p[0] == pytest.approx(0.04)
@@ -145,7 +145,7 @@ class TestSpectra:
         For a step function input, the peak displacement of an undamped
         SDOF is 2 * F/k (dynamic amplification factor = 2).
         """
-        from eqsignalpy.core import Spectra
+        from seiswave.core import Spectra
         T = 1.0  # period
         omega = 2 * np.pi / T
         k = omega**2  # unit mass
@@ -161,7 +161,7 @@ class TestSpectra:
     def test_compute_response_spectrum(self):
         """Compute spectrum of a simple sinusoidal signal and check
         that the peak Sa is near the resonant period."""
-        from eqsignalpy.core import Spectra
+        from seiswave.core import Spectra
         f0 = 5.0  # 5 Hz => T = 0.2s
         dt = 0.005
         t = np.arange(0, 10, dt)
@@ -174,7 +174,7 @@ class TestSpectra:
         assert periods[peak_idx] == pytest.approx(0.2, abs=0.1)
 
     def test_freq_domain_method(self):
-        from eqsignalpy.core import Spectra
+        from seiswave.core import Spectra
         dt = 0.01
         acc = np.random.randn(1000) * 0.1
         periods = np.array([0.5, 1.0, 2.0])
@@ -191,14 +191,14 @@ class TestSpectra:
 
 class TestCodeSpectrum:
     def test_get_params_basic(self):
-        from eqsignalpy.core import CodeSpectrum
+        from seiswave.core import CodeSpectrum
         p = CodeSpectrum.get_params(8, 2, 'II', 'frequent')
         assert p['Tg'] == pytest.approx(0.40)
         assert p['alpha_max'] == pytest.approx(0.16)
 
     def test_get_params_all_combos(self):
         """Verify all valid parameter combinations don't raise."""
-        from eqsignalpy.core import CodeSpectrum
+        from seiswave.core import CodeSpectrum
         for group in [1, 2, 3]:
             for site in ['I0', 'I1', 'II', 'III', 'IV']:
                 for level in ['frequent', 'basic', 'rare']:
@@ -208,7 +208,7 @@ class TestCodeSpectrum:
                         assert p['alpha_max'] > 0
 
     def test_get_params_invalid(self):
-        from eqsignalpy.core import CodeSpectrum
+        from seiswave.core import CodeSpectrum
         with pytest.raises(KeyError):
             CodeSpectrum.get_params(5, 1, 'II', 'frequent')
         with pytest.raises(KeyError):
@@ -216,7 +216,7 @@ class TestCodeSpectrum:
 
     def test_gb50011_four_segments(self):
         """Verify the 4-segment shape of the regular spectrum."""
-        from eqsignalpy.core import CodeSpectrum
+        from seiswave.core import CodeSpectrum
         Tg = 0.40
         alpha_max = 0.16
         periods = np.linspace(0.0, 6.0, 601)
@@ -237,7 +237,7 @@ class TestCodeSpectrum:
         """Isolation spectrum: 3 segments (no linear decay).
         Regular and isolation are identical for T <= 5*Tg.
         For T > 5*Tg, they diverge (regular has linear decay segment)."""
-        from eqsignalpy.core import CodeSpectrum
+        from seiswave.core import CodeSpectrum
         Tg = 0.40
         alpha_max = 0.16
         periods = np.linspace(0.01, 6.0, 600)
@@ -255,7 +255,7 @@ class TestCodeSpectrum:
 
     def test_damping_adjustment(self):
         """Non-5% damping should adjust the spectrum."""
-        from eqsignalpy.core import CodeSpectrum
+        from seiswave.core import CodeSpectrum
         Tg, alpha_max = 0.35, 0.08
         periods = np.linspace(0.01, 6.0, 300)
         a5 = CodeSpectrum.gb50011(periods, Tg, alpha_max, zeta=0.05)
@@ -264,7 +264,7 @@ class TestCodeSpectrum:
         assert np.mean(a10) < np.mean(a5)
 
     def test_from_params(self):
-        from eqsignalpy.core import CodeSpectrum
+        from seiswave.core import CodeSpectrum
         periods = np.linspace(0.01, 6.0, 100)
         alpha = CodeSpectrum.from_params(periods, 8, 2, 'II', 'frequent')
         assert len(alpha) == 100
@@ -275,7 +275,7 @@ class TestCodeSpectrum:
 
 class TestFilter:
     def test_detrend_removes_linear(self):
-        from eqsignalpy.core import Filter
+        from seiswave.core import Filter
         n = 1000
         dt = 0.01
         t = np.arange(n) * dt
@@ -286,7 +286,7 @@ class TestFilter:
         assert abs(np.mean(result)) < 0.05
 
     def test_bilinear_detrend(self):
-        from eqsignalpy.core import Filter
+        from seiswave.core import Filter
         n = 500
         # Create signal with bilinear trend
         a = np.zeros(n)
@@ -299,7 +299,7 @@ class TestFilter:
         assert np.std(result) < np.std(signal)
 
     def test_butterworth_bandpass(self):
-        from eqsignalpy.core import Filter
+        from seiswave.core import Filter
         dt = 0.01
         n = 2000
         t = np.arange(n) * dt
@@ -319,7 +319,7 @@ class TestFilter:
 
 class TestFFT:
     def test_amplitude_spectrum_peak(self):
-        from eqsignalpy.core import FFT
+        from seiswave.core import FFT
         dt = 0.01
         f0 = 5.0
         t = np.arange(0, 10, dt)
@@ -330,7 +330,7 @@ class TestFFT:
         assert peak_freq == pytest.approx(f0, abs=0.5)
 
     def test_welch_psd(self):
-        from eqsignalpy.core import FFT
+        from seiswave.core import FFT
         dt = 0.01
         acc = np.random.randn(5000)
         freqs, psd = FFT.welch_psd(acc, dt)
@@ -345,7 +345,7 @@ class TestFFT:
 class TestWaveGenerator:
     def test_generate_convergence(self):
         """Test that generated wave's spectrum converges toward target."""
-        from eqsignalpy.core import WaveGenerator, CodeSpectrum, Spectra
+        from seiswave.core import WaveGenerator, CodeSpectrum, Spectra
         np.random.seed(42)  # reproducible
         periods = Spectra.default_periods(0.1, 4.0, 50, mode='log')
         target = CodeSpectrum.gb50011(periods, 0.40, 0.16)
@@ -360,7 +360,7 @@ class TestWaveGenerator:
         assert errors['mean_error'] < 0.80
 
     def test_fit_error(self):
-        from eqsignalpy.core import WaveGenerator
+        from seiswave.core import WaveGenerator
         target = np.array([1.0, 2.0, 3.0])
         actual = np.array([1.1, 1.8, 3.3])
         err = WaveGenerator.fit_error(actual, target)
@@ -371,7 +371,7 @@ class TestWaveGenerator:
 
 class TestWaveSelector:
     def test_duration_check(self):
-        from eqsignalpy.core import (
+        from seiswave.core import (
             WaveSelector, SelectionCriteria, EQRecord
         )
         criteria = SelectionCriteria(
@@ -389,7 +389,7 @@ class TestWaveSelector:
         assert not ok
 
     def test_full_selection_flow(self):
-        from eqsignalpy.core import (
+        from seiswave.core import (
             WaveSelector, SelectionCriteria, EQRecord
         )
         criteria = SelectionCriteria(

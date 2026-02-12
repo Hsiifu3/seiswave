@@ -12,10 +12,10 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Signal, Qt
 
-from eqsignalpy.core import FileIO, EQSignal
-from eqsignalpy.gui.widgets.wave_table import WaveTable
-from eqsignalpy.gui.widgets.plot_widget import PlotWidget
-from eqsignalpy.gui.styles import get_mpl_colors
+from seiswave.core import FileIO, EQSignal
+from seiswave.gui.widgets.wave_table import WaveTable
+from seiswave.gui.widgets.plot_widget import PlotWidget
+from seiswave.gui.styles import get_mpl_colors
 
 
 class ImportPanel(QWidget):

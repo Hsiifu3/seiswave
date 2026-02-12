@@ -4,7 +4,7 @@ with open("README.md", encoding="utf-8") as f:
     long_description = f.read()
 
 setup(
-    name="eqsignalpy",
+    name="seiswave",
     version="2.0.0",
     packages=find_packages(exclude=["tests*", "examples*", "matlab_ref*"]),
     install_requires=[
@@ -17,10 +17,10 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "eqsignalpy=eqsignalpy.__main__:main",
+            "seiswave=seiswave.__main__:main",
         ],
         "gui_scripts": [
-            "eqsignalpy-gui=eqsignalpy.__main__:main",
+            "seiswave-gui=seiswave.__main__:main",
         ],
     },
     author="Hsiifu3",
@@ -28,7 +28,7 @@ setup(
     description="地震信号处理与选波工具包 / Seismic Signal Processing & Wave Selection Toolkit",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/Hsiifu3/eqsignalpy",
+    url="https://github.com/Hsiifu3/seiswave",
     license="MIT",
     classifiers=[
         "Programming Language :: Python :: 3",

@@ -331,7 +331,7 @@ class FileIO:
 
         with open(filepath, 'w') as f:
             f.write(meta.get('header1', 'PEER NGA STRONG MOTION DATABASE RECORD') + '\n')
-            f.write(meta.get('header2', f'EQSignalPy Generated, dt={dt:.4f}s') + '\n')
+            f.write(meta.get('header2', f'SeisWave Generated, dt={dt:.4f}s') + '\n')
             f.write(meta.get('header3', 'ACCELERATION (G)') + '\n')
             f.write(f'NPTS= {npts:>8d}, DT= {dt:>10.6f} SEC\n')
 

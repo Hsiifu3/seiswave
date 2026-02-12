@@ -1,9 +1,9 @@
 @echo off
-REM EQSignalPy Windows Build Script
+REM SeisWave Windows Build Script
 REM Usage: scripts\build_win.bat
 
 echo ============================================
-echo  EQSignalPy Windows Build
+echo  SeisWave Windows Build
 echo ============================================
 
 cd /d "%~dp0\.."
@@ -25,7 +25,7 @@ pip install -r requirements.txt
 pip install -e .
 
 REM Build
-echo [3/3] Building EQSignalPy...
+echo [3/3] Building SeisWave...
 python -m PyInstaller build.spec --noconfirm --clean
 
 if errorlevel 1 (
@@ -35,6 +35,6 @@ if errorlevel 1 (
 
 echo ============================================
 echo  Build complete!
-echo  Output: dist\EQSignalPy\
+echo  Output: dist\SeisWave\
 echo ============================================
 pause
