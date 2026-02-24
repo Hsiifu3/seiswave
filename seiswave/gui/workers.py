@@ -216,6 +216,126 @@ class GeneratorWorker(BaseWorker):
         return self._generate_inprocess()
 
 
+class MultiTrialGeneratorWorker(BaseWorker):
+    """多 trial 人工波生成 Worker，自动取最优结果。
+
+    每个 trial 独立生成一条人工波，最终选取均方根误差最小的。
+    finished 信号返回 dict: {'best': EQSignal, 'all_results': [...], 'best_index': int}
+    """
+
+    def __init__(self, target_spectrum, periods, n=4096, dt=0.02,
+                 zeta=0.05, pga=1.0, tol=0.05, max_iter=50,
+                 n_trials=3, parent=None):
+        super().__init__(parent)
+        self._target = np.asarray(target_spectrum, dtype=np.float64)
+        self._periods = np.asarray(periods, dtype=np.float64)
+        self._n = n
+        self._dt = dt
+        self._zeta = zeta
+        self._pga = pga
+        self._tol = tol
+        self._max_iter = max_iter
+        self._n_trials = n_trials
+        self._process = None
+
+    def cancel(self):
+        super().cancel()
+        if self._process and self._process.is_alive():
+            self._process.terminate()
+
+    def _run_single_trial(self, trial_idx):
+        from seiswave.core.signal import EQSignal
+
+        parent_conn, child_conn = mp.Pipe()
+        self._process = mp.Process(
+            target=_generator_subprocess,
+            args=(child_conn, self._target, self._periods,
+                  self._n, self._dt, self._zeta, self._pga,
+                  self._tol, self._max_iter),
+            daemon=True,
+        )
+        try:
+            self._process.start()
+        except Exception:
+            parent_conn.close()
+            return self._generate_inprocess_trial(trial_idx)
+
+        while self._process.is_alive() or parent_conn.poll():
+            if self.is_cancelled:
+                self._process.terminate()
+                raise InterruptedError("用户取消")
+            if parent_conn.poll(timeout=0.1):
+                msg = parent_conn.recv()
+                if msg[0] == 'progress':
+                    _, iteration, max_err, mean_err = msg
+                    base = int(trial_idx / self._n_trials * 100)
+                    step = int(iteration / self._max_iter
+                               / self._n_trials * 100)
+                    pct = min(base + step, 99)
+                    text = (f"Trial {trial_idx+1}/{self._n_trials} "
+                            f"迭代 {iteration}: 最大误差 {max_err:.4f}, "
+                            f"均值误差 {mean_err:.4f}")
+                    self.signals.progress.emit(pct, text)
+                elif msg[0] == 'done':
+                    _, acc, dt, name = msg
+                    result = EQSignal(np.asarray(acc), dt, name=name)
+                    result.a2vd()
+                    parent_conn.close()
+                    return result
+                elif msg[0] == 'error':
+                    parent_conn.close()
+                    raise RuntimeError(msg[1])
+
+        parent_conn.close()
+        return self._generate_inprocess_trial(trial_idx)
+
+    def _generate_inprocess_trial(self, trial_idx):
+        from seiswave.core import WaveGenerator
+
+        def progress_cb(iteration, max_err, mean_err):
+            if self.is_cancelled:
+                raise InterruptedError("用户取消")
+            base = int(trial_idx / self._n_trials * 100)
+            step = int(iteration / self._max_iter
+                       / self._n_trials * 100)
+            pct = min(base + step, 99)
+            text = (f"Trial {trial_idx+1}/{self._n_trials} "
+                    f"迭代 {iteration}: 最大误差 {max_err:.4f}, "
+                    f"均值误差 {mean_err:.4f}")
+            self.signals.progress.emit(pct, text)
+
+        return WaveGenerator.generate(
+            self._target, self._periods,
+            n=self._n, dt=self._dt, zeta=self._zeta,
+            pga=self._pga, tol=self._tol, max_iter=self._max_iter,
+            progress_callback=progress_cb,
+        )
+
+    def execute(self):
+        from seiswave.core import WaveGenerator, Spectra
+
+        all_results = []
+        errors = []
+
+        for t in range(self._n_trials):
+            if self.is_cancelled:
+                raise InterruptedError("用户取消")
+            sig = self._run_single_trial(t)
+            all_results.append(sig)
+            spec = Spectra.compute(sig.acc, sig.dt,
+                                   self._periods, self._zeta)
+            fit = WaveGenerator.fit_error(spec.sa, self._target)
+            errors.append(fit['mean_error'])
+
+        best_idx = int(np.argmin(errors))
+        self.signals.progress.emit(100, f"完成: 最优 Trial {best_idx+1}")
+        return {
+            'best': all_results[best_idx],
+            'all_results': all_results,
+            'best_index': best_idx,
+        }
+
+
 # ──────────── 文件加载 Worker ────────────
 
 
@@ -309,3 +429,156 @@ class PeerSelectWorker(BaseWorker):
             self.signals.progress.emit(pct, f"筛选 {i}/{total}")
 
         return selector.select(self._db, progress_cb=progress_cb)
+
+
+# ──────────── 向导流程 Workers ────────────
+
+
+class PeerIndexWorker(BaseWorker):
+    """PEER 数据库索引构建 Worker（仅建索引，不计算反应谱）"""
+
+    def __init__(self, data_dir, parent=None):
+        super().__init__(parent)
+        self._data_dir = data_dir
+
+    def execute(self):
+        from seiswave.core.peer_db import PeerDatabase
+
+        db = PeerDatabase(data_dir=self._data_dir)
+
+        self.signals.progress.emit(5, "检查索引缓存...")
+        if db.load_index():
+            self.signals.progress.emit(100, f"从缓存加载 {len(db)} 条记录")
+            return db
+
+        self.signals.progress.emit(10, "扫描 AT2 文件...")
+
+        def progress_cb(i, total):
+            if self.is_cancelled:
+                raise InterruptedError("用户取消")
+            pct = 10 + int(i / max(total, 1) * 80)
+            self.signals.progress.emit(pct, f"索引 {i}/{total}")
+
+        db.build_index(progress_cb=progress_cb)
+        db.save_index()
+        self.signals.progress.emit(100, f"索引完成: {len(db)} 条记录")
+        return db
+
+
+class SpectraPrecomputeWorker(BaseWorker):
+    """反应谱批量预计算 Worker（需已建立索引的 PeerDatabase）"""
+
+    def __init__(self, database, periods=None, zeta=0.05, parent=None):
+        super().__init__(parent)
+        self._db = database
+        self._periods = periods
+        self._zeta = zeta
+
+    def execute(self):
+        db = self._db
+        zeta = self._zeta
+
+        self.signals.progress.emit(5, "检查反应谱缓存...")
+        if db.load_spectra_cache(zeta):
+            n_cached = sum(1 for r in db.records if r.sa is not None)
+            self.signals.progress.emit(100, f"从缓存加载 {n_cached} 条反应谱")
+            return db
+
+        periods = self._periods
+        if periods is None:
+            periods = np.linspace(0.04, 6.0, 200)
+
+        self.signals.progress.emit(10, "预计算反应谱...")
+
+        def progress_cb(i, total):
+            if self.is_cancelled:
+                raise InterruptedError("用户取消")
+            pct = 10 + int(i / max(total, 1) * 85)
+            self.signals.progress.emit(pct, f"反应谱 {i}/{total}")
+
+        db.precompute_spectra(periods, zeta, progress_cb=progress_cb)
+        self.signals.progress.emit(100, "反应谱预计算完成")
+        return db
+
+
+class SelectorWorker(BaseWorker):
+    """选波 Worker（基于 SelectionConfig + PeerDatabase）"""
+
+    def __init__(self, config, database, parent=None):
+        super().__init__(parent)
+        self._config = config
+        self._db = database
+
+    def execute(self):
+        from seiswave.core.selector import WaveSelector
+
+        selector = WaveSelector(self._config)
+
+        def progress_cb(i, total):
+            if self.is_cancelled:
+                raise InterruptedError("用户取消")
+            pct = int(i / max(total, 1) * 100)
+            self.signals.progress.emit(pct, f"选波筛选 {i}/{total}")
+
+        results = selector.select(self._db, progress_cb=progress_cb)
+        self.signals.progress.emit(100, f"选波完成: {len(results)} 条")
+        return results
+
+
+class CombinerWorker(BaseWorker):
+    """组合输出 Worker（天然波 + 人工波 → 导出包）"""
+
+    def __init__(self, results, database, generated_waves,
+                 output_dir, fmt='at2', target_sa=None,
+                 periods=None, parent=None):
+        super().__init__(parent)
+        self._results = results          # list[SelectionResult]
+        self._db = database              # PeerDatabase
+        self._generated = generated_waves  # list[EQSignal]
+        self._output_dir = output_dir
+        self._fmt = fmt
+        self._target_sa = target_sa
+        self._periods = periods
+
+    def execute(self):
+        from seiswave.core.combiner import Combiner
+
+        combiner = Combiner(output_dir=self._output_dir)
+        total = len(self._results) + len(self._generated)
+        done = 0
+
+        # 添加天然波
+        for r in self._results:
+            if self.is_cancelled:
+                raise InterruptedError("用户取消")
+            combiner.add_natural(r, self._db)
+            done += 1
+            pct = int(done / max(total, 1) * 60)
+            self.signals.progress.emit(pct, f"添加天然波 {done}/{len(self._results)}")
+
+        # 添加人工波
+        for i, sig in enumerate(self._generated):
+            if self.is_cancelled:
+                raise InterruptedError("用户取消")
+            combiner.add_artificial(sig, name="artificial", index=i)
+            done += 1
+            pct = 60 + int((i + 1) / max(len(self._generated), 1) * 20)
+            self.signals.progress.emit(pct, f"添加人工波 {i + 1}/{len(self._generated)}")
+
+        # 导出
+        self.signals.progress.emit(85, "导出文件...")
+        combiner.export(fmt=self._fmt)
+
+        # 生成报告（如果有目标谱）
+        report_path = None
+        if self._target_sa is not None and self._periods is not None:
+            self.signals.progress.emit(92, "生成报告...")
+            report_path = combiner.generate_html_report(
+                self._target_sa, self._periods)
+
+        self.signals.progress.emit(100, "组合输出完成")
+        return {
+            'combiner': combiner,
+            'output_dir': self._output_dir,
+            'report_path': report_path,
+        }
