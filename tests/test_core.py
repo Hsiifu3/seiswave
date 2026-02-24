@@ -59,6 +59,64 @@ class TestFileIO:
         finally:
             os.unlink(path)
 
+    def test_parse_peer_filename_standard(self):
+        from seiswave.core import parse_peer_filename
+        meta = parse_peer_filename('RSN1004_NORTHR_SPV270.AT2')
+        assert meta['rsn'] == 1004
+        assert meta['event_tag'] == 'NORTHR'
+        assert meta['station_tag'] == 'SPV270'
+        assert meta['component'] == 'SPV270'
+
+    def test_parse_peer_filename_with_dots(self):
+        from seiswave.core import parse_peer_filename
+        meta = parse_peer_filename('RSN121_FRIULI.A_A-BCS000.AT2')
+        assert meta['rsn'] == 121
+        assert meta['event_tag'] == 'FRIULI.A'
+        assert meta['station_tag'] == 'A-BCS000'
+
+    def test_parse_peer_filename_vertical(self):
+        from seiswave.core import parse_peer_filename
+        meta = parse_peer_filename('RSN1004_NORTHR_SPV-UP.AT2')
+        assert meta['rsn'] == 1004
+        assert meta['component'] == 'SPV-UP'
+
+    def test_parse_peer_filename_no_rsn(self):
+        from seiswave.core import parse_peer_filename
+        meta = parse_peer_filename('SOME_RECORD.AT2')
+        assert meta['rsn'] == 0
+
+    def test_read_at2_metadata_fields(self):
+        """read_at2 应返回包含 rsn, event, station, date, component 的 metadata"""
+        from seiswave.core import FileIO
+        acc = np.sin(np.linspace(0, 6 * np.pi, 500)) * 0.3
+        dt = 0.01
+        with tempfile.NamedTemporaryFile(
+            suffix='.AT2', prefix='RSN999_TESTEQ_STA090',
+            delete=False
+        ) as f:
+            path = f.name
+        try:
+            FileIO.write_at2(path, acc, dt, metadata={
+                'header1': 'PEER NGA STRONG MOTION DATABASE RECORD',
+                'header2': 'TestEvent, 1/1/2000, TestStation, 090',
+                'header3': 'ACCELERATION TIME SERIES IN UNITS OF G',
+            })
+            rec = FileIO.read_at2(path)
+            # 向后兼容：原有字段仍存在
+            assert 'header1' in rec.metadata
+            assert 'header2' in rec.metadata
+            assert 'header3' in rec.metadata
+            # 新增字段
+            assert rec.metadata['event'] == 'TestEvent'
+            assert rec.metadata['date'] == '1/1/2000'
+            assert rec.metadata['station'] == 'TestStation'
+            assert rec.metadata['component'] == '090'
+            # dt 和 acc 不受影响
+            assert rec.dt == pytest.approx(dt)
+            np.testing.assert_allclose(rec.acc, acc, atol=1e-6)
+        finally:
+            os.unlink(path)
+
 
 # ═══════════════════ Signal Module ═══════════════════
 
@@ -406,4 +464,129 @@ class TestWaveSelector:
         rec_sa = np.ones(50) * 0.25
         scale = ws._optimal_scale(rec_sa, target_sa)
         assert 1.5 < scale < 2.5
+
+
+# ═══════════════════ Signal Panel Enhancement Tests ═══════════════════
+
+class TestAriasIntensity:
+    def test_arias_formula(self):
+        """Verify Ia = π/(2g) ∫a²dt for constant acceleration"""
+        from seiswave.core import EQSignal
+        n = 1000
+        dt = 0.01
+        a_val = 2.0  # m/s²
+        acc = np.ones(n) * a_val
+        sig = EQSignal(acc, dt=dt)
+        ia = sig.arias_intensity()
+        # Ia(t) = π/(2g) * a² * t  for constant a
+        t_end = (n - 1) * dt
+        expected = np.pi / (2.0 * 9.81) * a_val**2 * t_end
+        assert ia[-1] == pytest.approx(expected, rel=0.02)
+
+    def test_arias_zero_signal(self):
+        """Zero signal should have zero Arias intensity"""
+        from seiswave.core import EQSignal
+        sig = EQSignal(np.zeros(100), dt=0.01)
+        ia = sig.arias_intensity()
+        assert ia[-1] == pytest.approx(0.0)
+
+    def test_arias_monotonic(self):
+        """Cumulative Arias intensity must be non-decreasing"""
+        from seiswave.core import EQSignal
+        rng = np.random.RandomState(123)
+        acc = rng.randn(500) * 0.5
+        sig = EQSignal(acc, dt=0.01)
+        ia = sig.arias_intensity()
+        assert np.all(np.diff(ia) >= 0)
+
+
+class TestEffectiveDuration:
+    def test_d595_concentrated_motion(self):
+        """Signal with concentrated strong motion should have short D5-95"""
+        from seiswave.core import EQSignal
+        n = 2000
+        dt = 0.01
+        acc = np.zeros(n)
+        # Strong motion only in 5s-7s window
+        i1, i2 = 500, 700
+        rng = np.random.RandomState(42)
+        acc[i1:i2] = rng.randn(i2 - i1) * 5.0
+        acc[:i1] = rng.randn(i1) * 0.001
+        acc[i2:] = rng.randn(n - i2) * 0.001
+        sig = EQSignal(acc, dt=dt)
+        ed = sig.effective_duration
+        # D5-95 should be roughly 2s (between 5s and 7s)
+        assert 0.5 < ed < 5.0
+
+    def test_d595_zero_signal(self):
+        """Zero signal should have zero effective duration"""
+        from seiswave.core import EQSignal
+        sig = EQSignal(np.zeros(100), dt=0.01)
+        assert sig.effective_duration == 0.0
+
+    def test_d595_uniform_signal(self):
+        """Uniform random signal should have D5-95 close to 90% of total"""
+        from seiswave.core import EQSignal
+        rng = np.random.RandomState(99)
+        n = 5000
+        dt = 0.01
+        acc = rng.randn(n)
+        sig = EQSignal(acc, dt=dt)
+        total = sig.duration
+        ed = sig.effective_duration
+        # For uniform energy, D5-95 ~ 0.9 * total
+        assert 0.7 * total < ed < total
+
+
+class TestSignalPanelHelpers:
+    def test_arias_total_helper(self):
+        """Test the _arias_total helper used by the panel"""
+        from seiswave.core import EQSignal
+        from seiswave.gui.panels.signal_panel import _arias_total
+        acc = np.ones(500) * 1.0
+        sig = EQSignal(acc, dt=0.01)
+        ia = _arias_total(sig)
+        assert ia > 0
+        # Should match the last element of arias_intensity()
+        assert ia == pytest.approx(sig.arias_intensity()[-1])
+
+    def test_parameter_comparison_after_filter(self):
+        """Filtering should change PGA, Arias, and D5-95"""
+        from seiswave.core import EQSignal, Filter
+        from seiswave.gui.panels.signal_panel import _arias_total
+        dt = 0.01
+        n = 2000
+        t = np.arange(n) * dt
+        # 2 Hz + 20 Hz signal
+        acc = np.sin(2 * np.pi * 2 * t) + 0.5 * np.sin(2 * np.pi * 20 * t)
+        sig_orig = EQSignal(acc.copy(), dt=dt)
+        pga_before = sig_orig.pga
+        ia_before = _arias_total(sig_orig)
+
+        # Apply lowpass filter at 5 Hz (removes 20 Hz component)
+        filtered = Filter.butterworth(acc.copy(), dt, 'lowpass', 4, 5.0)
+        sig_proc = EQSignal(filtered, dt=dt)
+        pga_after = sig_proc.pga
+        ia_after = _arias_total(sig_proc)
+
+        # Filtering should reduce both PGA and Arias intensity
+        assert pga_after < pga_before
+        assert ia_after < ia_before
+
+    def test_parameter_comparison_after_trim(self):
+        """Trimming should change duration and Arias intensity"""
+        from seiswave.core import EQSignal
+        from seiswave.gui.panels.signal_panel import _arias_total
+        rng = np.random.RandomState(77)
+        acc = rng.randn(1000) * 0.5
+        sig = EQSignal(acc.copy(), dt=0.01)
+        ia_before = _arias_total(sig)
+        dur_before = sig.duration
+
+        sig.trim(100, 899)
+        ia_after = _arias_total(sig)
+        dur_after = sig.duration
+
+        assert dur_after < dur_before
+        assert ia_after < ia_before
 

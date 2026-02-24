@@ -8,7 +8,7 @@ from .signal import EQSignal
 from .spectrum import Spectra
 from .filter import Filter
 from .generator import WaveGenerator
-from .io import FileIO, EQRecord
+from .io import FileIO, EQRecord, parse_peer_filename
 from .code_spec import CodeSpectrum
 from .selector import WaveSelector, SelectionConfig, SelectionResult
 from .peer_db import PeerDatabase, PeerRecord
@@ -24,6 +24,7 @@ __all__ = [
     'WaveGenerator',
     'FileIO',
     'EQRecord',
+    'parse_peer_filename',
     'CodeSpectrum',
     'WaveSelector',
     'SelectionConfig',
