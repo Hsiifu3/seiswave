@@ -151,16 +151,17 @@ class ImportPanel(QWidget):
         self._signals = signals
         self._table.load_signals(signals)
         self._count_label.setText(f"已加载: {len(signals)} 条")
-        self.signals_loaded.emit(signals)
         self._load_btn.setEnabled(True)
+        # 先关闭进度对话框，再发射信号（避免在模态对话框中触发重计算）
         if hasattr(self, '_progress_dlg') and self._progress_dlg.isVisible():
-            self._progress_dlg.set_finished(f"加载完成，共 {len(signals)} 条记录")
+            self._progress_dlg.accept()
+        self.signals_loaded.emit(signals)
 
     def _on_load_error(self, error_msg):
         """文件加载出错回调"""
         self._load_btn.setEnabled(True)
         if hasattr(self, '_progress_dlg') and self._progress_dlg.isVisible():
-            self._progress_dlg.close()
+            self._progress_dlg.reject()
         QMessageBox.critical(self, "错误", f"加载失败: {error_msg}")
 
     def _on_wave_selected(self, row):
