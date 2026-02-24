@@ -97,69 +97,52 @@ class WaveGenerator:
     @staticmethod
     def _generate_fortran(ctrl_periods, ctrl_target, nP_orig, n, dt, zeta,
                           peak0, tol, max_iter, fm, progress_callback):
-        """Fortran 加速生成路径"""
+        """Fortran 加速生成路径
+
+        优化策略（参考 EQSignal 原始项目）：
+        - 控制点降采样到 ≤50 个（对数分布），避免 O(nP²) 爆炸
+        - 直接调用 fitspectrum 总入口，不在 Python 层重复扩展谱
+        - 不预缩放 PGA，让 Fortran 内部 adjustpeak 处理
+        """
         from .signal import EQSignal as EQSig
-        from .fortran_bridge import (init_art_wave, fit_spectra,
-                                      adjust_spectra, spectrum_mixed)
+        from .fortran_bridge import _eqs, spectrum_mixed
 
-        # 扩展目标谱（两端各加一个点，用于 initartwave）
-        nP_ext = nP_orig + 2
-        P_ext = np.empty(nP_ext)
-        P_ext[0] = ctrl_periods[0] * 0.5
-        P_ext[1:nP_orig+1] = ctrl_periods
-        P_ext[nP_orig+1] = ctrl_periods[-1] * 1.5
-        SPAT_ext = np.empty(nP_ext)
-        SPAT_ext[1:nP_orig+1] = ctrl_target
-        if nP_orig >= 2:
-            SPAT_ext[0] = ctrl_target[0] - (ctrl_target[1] - ctrl_target[0]) / \
-                          (ctrl_periods[1] - ctrl_periods[0]) * ctrl_periods[0] * 0.5
-            SPAT_ext[nP_orig+1] = ctrl_target[-1] + (ctrl_target[-1] - ctrl_target[-2]) / \
-                                  (ctrl_periods[-1] - ctrl_periods[-2]) * ctrl_periods[-1] * 0.5
-        else:
-            SPAT_ext[0] = ctrl_target[0]
-            SPAT_ext[nP_orig+1] = ctrl_target[0]
+        MAX_CTRL = 50  # adjustspectra 的 O(nP²) 限制
 
-        if fm == 0:
-            P = P_ext
-            SPAT = SPAT_ext
+        # 降采样控制点（对数分布）
+        if nP_orig > MAX_CTRL:
+            idx = np.unique(np.round(np.linspace(0, nP_orig - 1, MAX_CTRL)).astype(int))
+            P = np.ascontiguousarray(ctrl_periods[idx], dtype=np.float64)
+            SPAT = np.ascontiguousarray(ctrl_target[idx], dtype=np.float64)
         else:
-            P = ctrl_periods
-            SPAT = ctrl_target
+            P = np.ascontiguousarray(ctrl_periods, dtype=np.float64)
+            SPAT = np.ascontiguousarray(ctrl_target, dtype=np.float64)
 
         n_trials = 3
         global_best_acc = None
         global_best_error = float('inf')
 
         for trial in range(n_trials):
-            # 初始信号
-            acc = init_art_wave(n, dt, zeta, P_ext, SPAT_ext)
+            # 初始信号（Fortran initartwave 自动处理谱估计）
+            acc = _eqs.eqs.initartwave(n, dt, zeta, P, SPAT)
 
-            # 缩放到目标 PGA
-            pk = np.max(np.abs(acc))
-            if pk > 0:
-                acc *= peak0 / pk
+            # 缩放初始波到目标 PGA（fitspectrum 内部 adjustpeak 会维持此值）
+            pk = np.max(np.abs(acc[:n]))
+            if pk > 0 and peak0 > 0:
+                acc = acc * (peak0 / pk)
 
-            # 包络调制
-            envelope = WaveGenerator._envelope(n, dt)
-            acc *= envelope
-            pk = np.max(np.abs(acc))
-            if pk > 0:
-                acc *= peak0 / pk
+            # 直接调用 fitspectrum（内部处理扩展谱 + 迭代 + adjustpeak）
+            acc = _eqs.eqs.fitspectrum(acc, dt, zeta, P, SPAT,
+                                        tol, max_iter, fm, 1)
 
-            # Fortran 谱匹配
-            if fm == 0:
-                acc = fit_spectra(acc, dt, zeta, P, SPAT, tol, max_iter)
-            else:
-                acc = adjust_spectra(acc, dt, zeta, P, SPAT, tol, max_iter)
-
-            # 计算误差
+            # 计算误差（用原始完整控制点验证）
             spa, _ = spectrum_mixed(acc[:n], dt, zeta, ctrl_periods)
             e = (np.abs(spa) - ctrl_target) / np.maximum(ctrl_target, 1e-30)
             aerror = float(np.sqrt(np.mean(e * e)))
 
-            if progress_callback and trial == 0:
+            if progress_callback:
                 merror = float(np.max(np.abs(e)))
-                progress_callback(max_iter, merror, aerror)
+                progress_callback(max_iter * (trial + 1), merror, aerror)
 
             if aerror < global_best_error:
                 global_best_error = aerror
