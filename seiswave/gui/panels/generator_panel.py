@@ -1,27 +1,26 @@
 """
 人工波生成面板
 
-目标谱选择、参数设置、迭代过程可视化。
+目标谱选择、参数设置、多 trial 自动取最优、迭代进度实时显示、收敛谱对比。
 """
 
 import numpy as np
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
     QDoubleSpinBox, QSpinBox, QFormLayout, QPushButton, QComboBox,
-    QMessageBox, QSplitter, QSizePolicy,
+    QMessageBox, QSplitter, QSizePolicy, QProgressBar,
 )
 from PySide6.QtCore import Signal, Qt
 
 from seiswave.core import WaveGenerator, Spectra
 from seiswave.gui.widgets.spectrum_plot import SpectrumPlot
 from seiswave.gui.widgets.plot_widget import PlotWidget
-from seiswave.gui.widgets.progress_dialog import ProgressDialog
-from seiswave.gui.workers import GeneratorWorker
+from seiswave.gui.workers import MultiTrialGeneratorWorker
 from seiswave.gui.styles import get_mpl_colors
 
 
 class GeneratorPanel(QWidget):
-    """人工波生成面板"""
+    """人工波生成面板（多 trial + 实时进度 + 收敛谱对比）"""
 
     wave_generated = Signal(object)  # 生成完成信号 (EQSignal)
 
@@ -32,7 +31,6 @@ class GeneratorPanel(QWidget):
         self._code_sa = None
         self._generated = None
         self._worker = None
-        self._progress = None
         self._setup_ui()
 
     def _setup_ui(self):
@@ -56,7 +54,6 @@ class GeneratorPanel(QWidget):
         self._target_combo.setEnabled(False)
         target_form.addRow("目标谱来源:", self._target_combo)
         param_layout.addWidget(target_group)
-
         # 生成参数
         gen_group = QGroupBox("生成参数")
         gen_form = QFormLayout(gen_group)
@@ -96,7 +93,7 @@ class GeneratorPanel(QWidget):
 
         param_layout.addWidget(gen_group)
 
-        # 迭代参数
+        # 迭代控制
         iter_group = QGroupBox("迭代控制")
         iter_form = QFormLayout(iter_group)
         iter_form.setLabelAlignment(Qt.AlignRight)
@@ -117,15 +114,33 @@ class GeneratorPanel(QWidget):
         self._maxiter_spin.setFixedWidth(120)
         iter_form.addRow("最大迭代次数:", self._maxiter_spin)
 
-        param_layout.addWidget(iter_group)
+        self._trials_spin = QSpinBox()
+        self._trials_spin.setRange(1, 10)
+        self._trials_spin.setSingleStep(1)
+        self._trials_spin.setValue(3)
+        self._trials_spin.setFixedWidth(120)
+        iter_form.addRow("Trial 数量:", self._trials_spin)
 
+        param_layout.addWidget(iter_group)
         # 执行按钮
         self._run_btn = QPushButton("生成人工波")
         self._run_btn.clicked.connect(self._run_generation)
         param_layout.addWidget(self._run_btn)
 
+        # 实时进度区
+        progress_group = QGroupBox("迭代进度")
+        progress_layout = QVBoxLayout(progress_group)
+        self._progress_bar = QProgressBar()
+        self._progress_bar.setRange(0, 100)
+        self._progress_bar.setValue(0)
+        progress_layout.addWidget(self._progress_bar)
+        self._progress_label = QLabel("等待生成...")
+        self._progress_label.setWordWrap(True)
+        progress_layout.addWidget(self._progress_label)
+        param_layout.addWidget(progress_group)
+
         # 结果信息
-        self._info_label = QLabel("等待生成...")
+        self._info_label = QLabel("")
         self._info_label.setWordWrap(True)
         param_layout.addWidget(self._info_label)
 
@@ -135,12 +150,10 @@ class GeneratorPanel(QWidget):
         # 右侧绘图区（上下分割）
         right_splitter = QSplitter(Qt.Vertical)
 
-        # 反应谱对比图
         self._spec_plot = SpectrumPlot(dark=self._dark, log_x=False,
                                        show_toolbar=False)
         right_splitter.addWidget(self._spec_plot)
 
-        # 时程曲线图
         self._time_plot = PlotWidget(dark=self._dark, show_toolbar=False)
         right_splitter.addWidget(self._time_plot)
 
@@ -148,98 +161,126 @@ class GeneratorPanel(QWidget):
         right_splitter.setStretchFactor(0, 3)
         right_splitter.setStretchFactor(1, 2)
         layout.addWidget(right_splitter, 1)
-
     def set_code_spectrum(self, periods, sa):
         """设置规范谱作为目标谱"""
         self._code_periods = periods
         self._code_sa = sa
-        # 预览目标谱
         self._spec_plot.clear()
         self._spec_plot.plot_code_spectrum(periods, sa, label="目标谱")
         self._spec_plot.ax.set_title("目标反应谱", fontsize=11)
         self._spec_plot.refresh()
 
     def _run_generation(self):
-        """执行人工波生成"""
+        """执行多 trial 人工波生成"""
         if self._code_sa is None:
             QMessageBox.warning(self, "警告", "请先设置目标谱（在规范谱面板中设置）")
             return
 
-        periods = self._code_periods
-        target = self._code_sa
-
-        self._progress = ProgressDialog("人工波生成中...", self)
         self._run_btn.setEnabled(False)
+        self._progress_bar.setValue(0)
+        self._progress_label.setText("正在生成...")
+        self._info_label.setText("")
 
-        self._worker = GeneratorWorker(
-            target, periods,
+        self._worker = MultiTrialGeneratorWorker(
+            self._code_sa, self._code_periods,
             n=self._npts_spin.value(),
             dt=self._dt_spin.value(),
             zeta=self._zeta_spin.value(),
             pga=self._pga_spin.value(),
             tol=self._tol_spin.value(),
             max_iter=self._maxiter_spin.value(),
+            n_trials=self._trials_spin.value(),
             parent=self,
         )
-        self._worker.signals.progress.connect(self._progress.update_progress)
+        self._worker.signals.progress.connect(self._on_progress)
         self._worker.signals.finished.connect(self._on_generation_done)
         self._worker.signals.error.connect(self._on_generation_error)
-        self._progress.cancelled.connect(self._worker.cancel)
-
         self._worker.start()
-        self._progress.show()
 
-    def _on_generation_done(self, signal):
-        self._generated = signal
+    def _on_progress(self, pct, text):
+        """实时更新进度条和迭代数值"""
+        self._progress_bar.setValue(pct)
+        self._progress_label.setText(text)
+    def _on_generation_done(self, result):
+        """多 trial 完成：result = {'best': EQSignal, 'all_results': [...], 'best_index': int}"""
         self._run_btn.setEnabled(True)
+        self._progress_bar.setValue(100)
 
-        if self._progress:
-            self._progress.close()
-            self._progress = None
+        best = result['best']
+        all_results = result['all_results']
+        best_idx = result['best_index']
+        self._generated = best
 
-        # 先发射信号，确保即使绘图失败数据也能传递
-        self.wave_generated.emit(signal)
+        # 先发射信号
+        self.wave_generated.emit(best)
 
         try:
-            # 计算生成波的反应谱
-            spec = Spectra.compute(signal.acc, signal.dt, self._code_periods, 0.05)
-            fit = WaveGenerator.fit_error(spec.sa, self._code_sa)
+            colors = get_mpl_colors(self._dark)
+            palette = colors['palette']
 
-            self._info_label.setText(
-                f"PGA = {signal.pga:.4f} g\n"
-                f"持时 = {signal.duration:.2f} s\n"
-                f"最大偏差 = {fit['max_error']:.1%}\n"
-                f"均方根偏差 = {fit['mean_error']:.1%}"
-            )
+            # 计算所有 trial 的反应谱和误差
+            trial_spectra = []
+            trial_errors = []
+            for sig in all_results:
+                spec = Spectra.compute(sig.acc, sig.dt,
+                                       self._code_periods, 0.05)
+                fit = WaveGenerator.fit_error(spec.sa, self._code_sa)
+                trial_spectra.append(spec.sa)
+                trial_errors.append(fit)
 
-            # 绘制反应谱对比
+            best_fit = trial_errors[best_idx]
+            n_trials = len(all_results)
+
+            info_lines = [
+                f"最优: Trial {best_idx+1}/{n_trials}",
+                f"PGA = {best.pga:.4f} g",
+                f"持时 = {best.duration:.2f} s",
+                f"最大偏差 = {best_fit['max_error']:.1%}",
+                f"均方根偏差 = {best_fit['mean_error']:.1%}",
+            ]
+            self._info_label.setText("\n".join(info_lines))
+            self._progress_label.setText(
+                f"完成: {n_trials} trials, 最优 Trial {best_idx+1}")
+
+            # 绘制反应谱对比（目标谱 + 各 trial + 最优高亮）
             self._spec_plot.clear()
             self._spec_plot.plot_code_spectrum(
                 self._code_periods, self._code_sa, label="目标谱")
-            colors = get_mpl_colors(self._dark)
-            self._spec_plot.plot_spectrum(
-                self._code_periods, spec.sa,
-                label="生成波", color=colors['primary'], linewidth=2.0)
+            for i, sa in enumerate(trial_spectra):
+                if i == best_idx:
+                    continue
+                self._spec_plot.ax.plot(
+                    self._code_periods, sa,
+                    color=palette[i % len(palette)],
+                    linewidth=1.0, alpha=0.4,
+                    label=f"Trial {i+1}")
+            # 最优 trial 高亮
+            self._spec_plot.ax.plot(
+                self._code_periods, trial_spectra[best_idx],
+                color=colors['primary'], linewidth=2.2,
+                label=f"Trial {best_idx+1} (最优)")
+            self._spec_plot.ax.legend(fontsize=8, framealpha=0.8)
             self._spec_plot.ax.set_title("反应谱拟合对比", fontsize=11)
             self._spec_plot.refresh()
 
-            # 绘制时程曲线
+            # 绘制最优时程曲线
             self._time_plot.clear()
             ax = self._time_plot.ax
-            ax.plot(signal.time, signal.acc, color=colors['primary'], linewidth=0.6)
+            ax.plot(best.time, best.acc,
+                    color=colors['primary'], linewidth=0.6)
             ax.set_xlabel("时间 (s)")
             ax.set_ylabel("加速度 (g)")
-            ax.set_title("生成的人工地震波", fontsize=11)
+            ax.set_title(
+                f"人工波 Trial {best_idx+1} (PGA={best.pga:.3f}g)",
+                fontsize=11)
             self._time_plot.refresh()
         except Exception as e:
             self._info_label.setText(f"结果处理出错: {e}")
 
     def _on_generation_error(self, err):
         self._info_label.setText(f"生成出错: {err}")
+        self._progress_label.setText("生成失败")
         self._run_btn.setEnabled(True)
-        if self._progress:
-            self._progress.close()
-            self._progress = None
 
     def get_generated(self):
         return self._generated
