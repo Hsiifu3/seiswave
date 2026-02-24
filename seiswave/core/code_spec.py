@@ -151,6 +151,130 @@ class CodeSpectrum:
         return {"Tg": group_table[site_class], "alpha_max": level_table[intensity]}
 
     @staticmethod
+    def eurocode8(
+        periods: np.ndarray,
+        ag: float,
+        soil_type: str = "B",
+        spectrum_type: int = 1,
+        zeta: float = 0.05,
+    ) -> np.ndarray:
+        """
+        Eurocode 8 弹性反应谱。
+        Eurocode 8 elastic response spectrum (EN 1998-1).
+
+        Parameters
+        ----------
+        periods : np.ndarray
+            周期数组 (s)
+        ag : float
+            设计地面加速度 (g)
+        soil_type : str
+            场地类别 A/B/C/D/E
+        spectrum_type : int
+            谱类型 1 或 2
+        zeta : float
+            阻尼比
+
+        Returns
+        -------
+        np.ndarray
+            弹性反应谱 Se/g
+        """
+        # EC8 Table 3.2 / 3.3
+        params = {
+            1: {
+                "A": (1.0, 0.15, 0.4, 2.0),
+                "B": (1.2, 0.15, 0.5, 2.0),
+                "C": (1.15, 0.20, 0.6, 2.0),
+                "D": (1.35, 0.20, 0.8, 2.0),
+                "E": (1.4, 0.15, 0.5, 2.0),
+            },
+            2: {
+                "A": (1.0, 0.05, 0.25, 1.2),
+                "B": (1.35, 0.05, 0.25, 1.2),
+                "C": (1.5, 0.10, 0.25, 1.2),
+                "D": (1.8, 0.10, 0.30, 1.2),
+                "E": (1.6, 0.05, 0.25, 1.2),
+            },
+        }
+
+        if spectrum_type not in params:
+            raise ValueError(f"无效的谱类型: {spectrum_type}, 可选 1 或 2")
+        if soil_type not in params[spectrum_type]:
+            raise ValueError(f"无效的场地类别: {soil_type}, 可选 A/B/C/D/E")
+
+        S, TB, TC, TD = params[spectrum_type][soil_type]
+
+        # 阻尼修正系数
+        eta = max(0.55, np.sqrt(10.0 / (5.0 + zeta * 100.0)))
+
+        periods = np.asarray(periods, dtype=np.float64)
+        se = np.zeros_like(periods)
+
+        m1 = periods < TB
+        se[m1] = ag * S * (1.0 + periods[m1] / TB * (eta * 2.5 - 1.0))
+
+        m2 = (periods >= TB) & (periods <= TC)
+        se[m2] = ag * S * eta * 2.5
+
+        m3 = (periods > TC) & (periods <= TD)
+        se[m3] = ag * S * eta * 2.5 * (TC / periods[m3])
+
+        m4 = periods > TD
+        se[m4] = ag * S * eta * 2.5 * (TC * TD / periods[m4] ** 2)
+
+        np.clip(se, 0.0, None, out=se)
+        return se
+
+    @staticmethod
+    def asce7(
+        periods: np.ndarray,
+        sds: float,
+        sd1: float,
+        tl: float = 8.0,
+    ) -> np.ndarray:
+        """
+        ASCE 7 设计反应谱。
+        ASCE 7 design response spectrum.
+
+        Parameters
+        ----------
+        periods : np.ndarray
+            周期数组 (s)
+        sds : float
+            短周期设计谱加速度参数
+        sd1 : float
+            1s 周期设计谱加速度参数
+        tl : float
+            长周期转换周期 (s)
+
+        Returns
+        -------
+        np.ndarray
+            设计反应谱 Sa (g)
+        """
+        periods = np.asarray(periods, dtype=np.float64)
+        sa = np.zeros_like(periods)
+
+        t0 = 0.2 * sd1 / sds
+        ts = sd1 / sds
+
+        m1 = periods < t0
+        sa[m1] = sds * (0.4 + 0.6 * periods[m1] / t0)
+
+        m2 = (periods >= t0) & (periods <= ts)
+        sa[m2] = sds
+
+        m3 = (periods > ts) & (periods <= tl)
+        sa[m3] = sd1 / periods[m3]
+
+        m4 = periods > tl
+        sa[m4] = sd1 * tl / periods[m4] ** 2
+
+        np.clip(sa, 0.0, None, out=sa)
+        return sa
+
+    @staticmethod
     def from_params(
         periods: np.ndarray,
         intensity: float,
@@ -194,3 +318,147 @@ class CodeSpectrum:
             zeta=zeta,
             isolation=isolation,
         )
+
+    # GB/T 51408 隔震设计特征周期增量表 (s)
+    # Site class -> Tg increment for isolation per GB/T 51408
+    GB51408_TG_INCREMENT = {
+        "I0": 0.05,
+        "I1": 0.05,
+        "II": 0.05,
+        "III": 0.05,
+        "IV": 0.05,
+    }
+
+    @staticmethod
+    def gb51408(
+        periods: np.ndarray,
+        intensity: float,
+        group: int,
+        site_class: str,
+        level: str = "rare",
+        zeta: float = 0.05,
+    ) -> np.ndarray:
+        """
+        GB/T 51408 建筑隔震设计标准反应谱。
+        GB/T 51408 seismic isolation design spectrum.
+
+        基于 GB 50011 隔震三段式谱，特征周期 Tg 按 51408 规定增加。
+        Based on GB 50011 3-segment isolation spectrum with Tg adjustment
+        per GB/T 51408.
+
+        Parameters
+        ----------
+        periods : np.ndarray
+            周期数组 (s) / Period array (s)
+        intensity : float
+            抗震设防烈度 / Seismic intensity (6, 7, 7.5, 8, 8.5, 9)
+        group : int
+            设计地震分组 / Design earthquake group (1, 2, 3)
+        site_class : str
+            场地类别 / Site class (I0, I1, II, III, IV)
+        level : str
+            地震水准 / Seismic level (默认 rare)
+        zeta : float
+            阻尼比 / Damping ratio
+
+        Returns
+        -------
+        np.ndarray
+            地震影响系数数组 / Influence coefficient array
+        """
+        params = CodeSpectrum.get_params(intensity, group, site_class, level)
+        increment = CodeSpectrum.GB51408_TG_INCREMENT.get(site_class, 0.05)
+        Tg_iso = params["Tg"] + increment
+        return CodeSpectrum.gb50011(
+            periods, Tg_iso, params["alpha_max"], zeta=zeta, isolation=True
+        )
+
+    @staticmethod
+    def from_custom(
+        custom_periods: np.ndarray,
+        custom_sa: np.ndarray,
+        periods: np.ndarray,
+        interp_mode: str = "linear",
+    ) -> np.ndarray:
+        """
+        自定义谱插值到任意周期点。
+        Interpolate a custom spectrum onto arbitrary periods.
+
+        Parameters
+        ----------
+        custom_periods : array_like
+            自定义周期点 / Custom period points
+        custom_sa : array_like
+            自定义谱加速度 / Custom spectral acceleration
+        periods : array_like
+            目标周期数组 / Target period array
+        interp_mode : str
+            插值方式 'linear' 或 'log' / Interpolation mode
+
+        Returns
+        -------
+        np.ndarray
+            插值后的谱加速度 / Interpolated spectral acceleration
+        """
+        custom_periods = np.asarray(custom_periods, dtype=np.float64)
+        custom_sa = np.asarray(custom_sa, dtype=np.float64)
+        periods = np.asarray(periods, dtype=np.float64)
+
+        if interp_mode == "linear":
+            return np.interp(periods, custom_periods, custom_sa)
+        elif interp_mode == "log":
+            # 对数-对数空间插值，跳过零值周期
+            mask_src = custom_periods > 0
+            mask_dst = periods > 0
+            result = np.zeros_like(periods)
+            result[mask_dst] = np.exp(
+                np.interp(
+                    np.log(periods[mask_dst]),
+                    np.log(custom_periods[mask_src]),
+                    np.log(np.maximum(custom_sa[mask_src], 1e-30)),
+                )
+            )
+            return result
+        else:
+            raise ValueError(
+                f"不支持的插值方式: '{interp_mode}', 可选 'linear' 或 'log'"
+            )
+
+    @staticmethod
+    def from_csv(filepath: str) -> tuple:
+        """
+        从 CSV/TXT 文件读取自定义谱。
+        Read custom spectrum from CSV/TXT file.
+
+        支持逗号、空格、制表符分隔，跳过 # 注释行和空行。
+        Supports comma/space/tab delimiters, skips # comments and blank lines.
+
+        Parameters
+        ----------
+        filepath : str
+            文件路径 / File path
+
+        Returns
+        -------
+        tuple
+            (periods, sa) — 两个 numpy 数组 / Two numpy arrays
+        """
+        periods_list = []
+        sa_list = []
+        with open(filepath, "r", encoding="utf-8-sig") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                # 尝试多种分隔符: 逗号 > 制表符 > 空格
+                if "," in line:
+                    parts = line.split(",")
+                elif "\t" in line:
+                    parts = line.split("\t")
+                else:
+                    parts = line.split()
+                if len(parts) < 2:
+                    continue
+                periods_list.append(float(parts[0].strip()))
+                sa_list.append(float(parts[1].strip()))
+        return (np.array(periods_list), np.array(sa_list))

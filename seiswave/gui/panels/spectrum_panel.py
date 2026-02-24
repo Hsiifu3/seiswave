@@ -1,16 +1,17 @@
 """
 规范谱设置面板
 
-GB 50011 规范选择、烈度、设计地震分组、场地类别、阻尼比、隔震开关。
-实时预览规范谱曲线。
+独立的规范谱预览面板（已被 SpectrumSidebar 替代主要功能）。
+保留此文件以兼容旧导入路径。
 """
 
 import numpy as np
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
     QComboBox, QDoubleSpinBox, QCheckBox, QFormLayout, QPushButton,
+    QFileDialog,
 )
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, Qt
 
 from seiswave.core import CodeSpectrum, Spectra
 from seiswave.gui.widgets.spectrum_plot import SpectrumPlot
@@ -43,36 +44,95 @@ class SpectrumPanel(QWidget):
         # 规范选择
         code_group = QGroupBox("规范选择")
         code_form = QFormLayout(code_group)
+        code_form.setLabelAlignment(Qt.AlignRight)
         self._code_combo = QComboBox()
-        self._code_combo.addItems(["GB 50011-2010"])
+        self._code_combo.addItems(["GB 50011-2010", "Eurocode 8", "ASCE 7"])
         code_form.addRow("规范:", self._code_combo)
         param_layout.addWidget(code_group)
 
-        # 设防参数
-        param_group = QGroupBox("设防参数")
-        param_form = QFormLayout(param_group)
+        # GB 50011 参数
+        self._gb_group = QGroupBox("GB 50011 设防参数")
+        gb_form = QFormLayout(self._gb_group)
+        gb_form.setLabelAlignment(Qt.AlignRight)
 
         self._intensity_combo = QComboBox()
         self._intensity_combo.addItems(["6度", "7度", "7度半", "8度", "8度半", "9度"])
-        param_form.addRow("抗震设防烈度:", self._intensity_combo)
+        gb_form.addRow("抗震设防烈度:", self._intensity_combo)
 
         self._group_combo = QComboBox()
         self._group_combo.addItems(["第一组", "第二组", "第三组"])
-        param_form.addRow("设计地震分组:", self._group_combo)
+        gb_form.addRow("设计地震分组:", self._group_combo)
 
         self._site_combo = QComboBox()
         self._site_combo.addItems(["I₀类", "I₁类", "II类", "III类", "IV类"])
-        param_form.addRow("场地类别:", self._site_combo)
+        gb_form.addRow("场地类别:", self._site_combo)
 
         self._level_combo = QComboBox()
         self._level_combo.addItems(["多遇地震", "设防地震", "罕遇地震"])
-        param_form.addRow("地震水准:", self._level_combo)
+        gb_form.addRow("地震水准:", self._level_combo)
 
-        param_layout.addWidget(param_group)
+        param_layout.addWidget(self._gb_group)
+
+        # EC8 参数
+        self._ec8_group = QGroupBox("Eurocode 8 参数")
+        ec8_form = QFormLayout(self._ec8_group)
+        ec8_form.setLabelAlignment(Qt.AlignRight)
+        ec8_form.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+
+        self._ec8_ag_spin = QDoubleSpinBox()
+        self._ec8_ag_spin.setRange(0.01, 2.0)
+        self._ec8_ag_spin.setSingleStep(0.05)
+        self._ec8_ag_spin.setValue(0.25)
+        self._ec8_ag_spin.setDecimals(2)
+        ec8_form.addRow("ag (g):", self._ec8_ag_spin)
+
+        self._ec8_soil_combo = QComboBox()
+        self._ec8_soil_combo.addItems(["A", "B", "C", "D", "E"])
+        self._ec8_soil_combo.setCurrentIndex(1)
+        ec8_form.addRow("场地类别:", self._ec8_soil_combo)
+
+        self._ec8_type_combo = QComboBox()
+        self._ec8_type_combo.addItems(["Type 1", "Type 2"])
+        ec8_form.addRow("谱类型:", self._ec8_type_combo)
+
+        self._ec8_group.setVisible(False)
+        param_layout.addWidget(self._ec8_group)
+
+        # ASCE 7 参数
+        self._asce_group = QGroupBox("ASCE 7 参数")
+        asce_form = QFormLayout(self._asce_group)
+        asce_form.setLabelAlignment(Qt.AlignRight)
+        asce_form.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+
+        self._asce_sds_spin = QDoubleSpinBox()
+        self._asce_sds_spin.setRange(0.01, 3.0)
+        self._asce_sds_spin.setSingleStep(0.1)
+        self._asce_sds_spin.setValue(1.0)
+        self._asce_sds_spin.setDecimals(2)
+        asce_form.addRow("SDS (g):", self._asce_sds_spin)
+
+        self._asce_sd1_spin = QDoubleSpinBox()
+        self._asce_sd1_spin.setRange(0.01, 2.0)
+        self._asce_sd1_spin.setSingleStep(0.1)
+        self._asce_sd1_spin.setValue(0.5)
+        self._asce_sd1_spin.setDecimals(2)
+        asce_form.addRow("SD1 (g):", self._asce_sd1_spin)
+
+        self._asce_tl_spin = QDoubleSpinBox()
+        self._asce_tl_spin.setRange(4.0, 16.0)
+        self._asce_tl_spin.setSingleStep(1.0)
+        self._asce_tl_spin.setValue(8.0)
+        self._asce_tl_spin.setDecimals(1)
+        asce_form.addRow("TL (s):", self._asce_tl_spin)
+
+        self._asce_group.setVisible(False)
+        param_layout.addWidget(self._asce_group)
 
         # 阻尼与隔震
         damp_group = QGroupBox("阻尼与隔震")
         damp_form = QFormLayout(damp_group)
+        damp_form.setLabelAlignment(Qt.AlignRight)
+        damp_form.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
 
         self._zeta_spin = QDoubleSpinBox()
         self._zeta_spin.setRange(0.01, 0.30)
@@ -109,19 +169,30 @@ class SpectrumPanel(QWidget):
         layout.addWidget(self._plot, 1)
 
     def _connect_signals(self):
+        self._code_combo.currentIndexChanged.connect(self._on_code_changed)
         self._intensity_combo.currentIndexChanged.connect(self._update_spectrum)
         self._group_combo.currentIndexChanged.connect(self._update_spectrum)
         self._site_combo.currentIndexChanged.connect(self._update_spectrum)
         self._level_combo.currentIndexChanged.connect(self._update_spectrum)
         self._zeta_spin.valueChanged.connect(self._update_spectrum)
         self._isolation_check.stateChanged.connect(self._update_spectrum)
+        self._ec8_ag_spin.valueChanged.connect(self._update_spectrum)
+        self._ec8_soil_combo.currentIndexChanged.connect(self._update_spectrum)
+        self._ec8_type_combo.currentIndexChanged.connect(self._update_spectrum)
+        self._asce_sds_spin.valueChanged.connect(self._update_spectrum)
+        self._asce_sd1_spin.valueChanged.connect(self._update_spectrum)
+        self._asce_tl_spin.valueChanged.connect(self._update_spectrum)
+
+    def _on_code_changed(self, index):
+        self._gb_group.setVisible(index == 0)
+        self._ec8_group.setVisible(index == 1)
+        self._asce_group.setVisible(index == 2)
+        self._update_spectrum()
 
     def _get_params(self):
-        """从 UI 获取当前参数"""
         intensity_map = {0: 6, 1: 7, 2: 7.5, 3: 8, 4: 8.5, 5: 9}
         site_map = {0: "I0", 1: "I1", 2: "II", 3: "III", 4: "IV"}
         level_map = {0: "frequent", 1: "basic", 2: "rare"}
-
         return {
             'intensity': intensity_map[self._intensity_combo.currentIndex()],
             'group': self._group_combo.currentIndex() + 1,
@@ -131,37 +202,69 @@ class SpectrumPanel(QWidget):
             'isolation': self._isolation_check.isChecked(),
         }
 
-    def _update_spectrum(self):
-        """更新规范谱曲线"""
-        params = self._get_params()
+    def _update_spectrum(self, *args):
+        code_index = self._code_combo.currentIndex()
+        zeta = self._zeta_spin.value()
+
         try:
-            code_params = CodeSpectrum.get_params(
-                params['intensity'], params['group'],
-                params['site_class'], params['level'],
-            )
-            sa = CodeSpectrum.gb50011(
-                self._periods, code_params['Tg'], code_params['alpha_max'],
-                zeta=params['zeta'], isolation=params['isolation'],
-            )
+            if code_index == 0:
+                params = self._get_params()
+                code_params = CodeSpectrum.get_params(
+                    params['intensity'], params['group'],
+                    params['site_class'], params['level'],
+                )
+                sa = CodeSpectrum.gb50011(
+                    self._periods, code_params['Tg'], code_params['alpha_max'],
+                    zeta=zeta, isolation=params['isolation'],
+                )
+                mode = "隔震谱" if params['isolation'] else "抗震谱"
+                self._info_label.setText(
+                    f"特征周期 Tg = {code_params['Tg']:.2f} s\n"
+                    f"αmax = {code_params['alpha_max']:.3f}\n"
+                    f"阻尼比 ζ = {zeta:.2f}\n"
+                    f"谱类型: {mode}"
+                )
+                title = (f"GB 50011 设计反应谱 ({params['intensity']}度, "
+                         f"第{params['group']}组, {params['site_class']}类场地)")
+                label = f"GB 50011 {mode}"
+
+            elif code_index == 1:
+                ag = self._ec8_ag_spin.value()
+                soil = self._ec8_soil_combo.currentText()
+                stype = self._ec8_type_combo.currentIndex() + 1
+                sa = CodeSpectrum.eurocode8(
+                    self._periods, ag, soil_type=soil,
+                    spectrum_type=stype, zeta=zeta,
+                )
+                self._info_label.setText(
+                    f"ag = {ag:.2f} g\n"
+                    f"场地类别: {soil}\n"
+                    f"谱类型: Type {stype}\n"
+                    f"阻尼比 ζ = {zeta:.2f}"
+                )
+                title = f"Eurocode 8 弹性反应谱 (ag={ag}g, {soil}类场地, Type {stype})"
+                label = f"EC8 Type {stype}"
+
+            elif code_index == 2:
+                sds = self._asce_sds_spin.value()
+                sd1 = self._asce_sd1_spin.value()
+                tl = self._asce_tl_spin.value()
+                sa = CodeSpectrum.asce7(self._periods, sds, sd1, tl=tl)
+                self._info_label.setText(
+                    f"SDS = {sds:.2f} g\n"
+                    f"SD1 = {sd1:.2f} g\n"
+                    f"TL = {tl:.1f} s"
+                )
+                title = f"ASCE 7 设计反应谱 (SDS={sds}g, SD1={sd1}g)"
+                label = "ASCE 7"
+            else:
+                return
+
             self._current_sa = sa
 
-            # 更新信息标签
-            mode = "隔震谱" if params['isolation'] else "抗震谱"
-            self._info_label.setText(
-                f"特征周期 Tg = {code_params['Tg']:.2f} s\n"
-                f"αmax = {code_params['alpha_max']:.3f}\n"
-                f"阻尼比 ζ = {params['zeta']:.2f}\n"
-                f"谱类型: {mode}"
-            )
-
-            # 更新绘图
             self._plot.clear()
-            self._plot.plot_code_spectrum(self._periods, sa, label=f"GB 50011 {mode}")
-            self._plot.ax.set_title(
-                f"GB 50011 设计反应谱 ({params['intensity']}度, "
-                f"第{params['group']}组, {params['site_class']}类场地)",
-                fontsize=12,
-            )
+            self._plot.plot_code_spectrum(self._periods, sa, label=label)
+            self._plot.ax.set_title(title, fontsize=12)
             self._plot.refresh()
 
             self.spectrum_changed.emit(self._periods, sa)
@@ -170,10 +273,8 @@ class SpectrumPanel(QWidget):
             self._info_label.setText(f"参数错误: {e}")
 
     def _export_spectrum(self):
-        """导出规范谱数据到 CSV"""
         if self._current_sa is None:
             return
-        from PySide6.QtWidgets import QFileDialog
         path, _ = QFileDialog.getSaveFileName(
             self, "导出规范谱", "code_spectrum.csv", "CSV 文件 (*.csv)",
         )
@@ -182,14 +283,12 @@ class SpectrumPanel(QWidget):
             FileIO.write_csv(path, T=self._periods, Sa=self._current_sa)
 
     def get_spectrum(self):
-        """获取当前规范谱数据"""
         return self._periods, self._current_sa
 
     def get_params(self):
-        """获取当前设防参数"""
         return self._get_params()
 
-    def set_dark(self, dark: bool):
+    def set_dark(self, dark):
         self._dark = dark
         self._plot.set_dark(dark)
         self._update_spectrum()

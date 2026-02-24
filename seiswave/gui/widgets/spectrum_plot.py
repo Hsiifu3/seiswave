@@ -5,6 +5,8 @@
 """
 
 import numpy as np
+from PySide6.QtCore import Qt
+
 from seiswave.gui.widgets.plot_widget import PlotWidget
 from seiswave.gui.styles import get_mpl_colors
 
@@ -12,14 +14,20 @@ from seiswave.gui.styles import get_mpl_colors
 class SpectrumPlot(PlotWidget):
     """反应谱绘图控件"""
 
-    def __init__(self, parent=None, dark=False):
-        super().__init__(parent, dark=dark)
+    def __init__(self, parent=None, dark=False, log_x=True,
+                 show_toolbar=False, compact_toolbar=True):
+        super().__init__(parent, dark=dark, show_toolbar=show_toolbar,
+                         compact_toolbar=compact_toolbar)
+        self._log_x = log_x
         self._setup_axes()
 
     def _setup_axes(self):
         self.ax.set_xlabel("周期 T (s)")
         self.ax.set_ylabel("加速度反应谱 Sa (g)")
-        self.ax.set_xscale('log')
+        if self._log_x:
+            self.ax.set_xscale('log')
+        else:
+            self.ax.set_xscale('linear')
         self.ax.set_xlim(0.01, 10)
 
     def clear(self):

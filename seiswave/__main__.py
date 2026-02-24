@@ -8,6 +8,14 @@ import sys
 
 
 def main():
+    import multiprocessing
+    multiprocessing.set_start_method('spawn', force=True)
+
+    # Matplotlib 字体配置：中文宋体 + 英文 Times New Roman + 负号修复
+    import matplotlib
+    matplotlib.rcParams['font.family'] = ['Times New Roman', 'Songti SC']
+    matplotlib.rcParams['axes.unicode_minus'] = False
+
     from PySide6.QtWidgets import QApplication
     from PySide6.QtCore import Qt
 
@@ -22,7 +30,14 @@ def main():
 
     # 设置默认字体
     from PySide6.QtGui import QFont
+    import platform
     font = QFont()
+    if platform.system() == "Darwin":
+        font.setFamilies([".AppleSystemUIFont", "PingFang SC", "Helvetica Neue"])
+    elif platform.system() == "Windows":
+        font.setFamilies(["Microsoft YaHei UI", "Segoe UI"])
+    else:
+        font.setFamilies(["Noto Sans CJK SC", "sans-serif"])
     font.setPointSize(13)
     app.setFont(font)
 

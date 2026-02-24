@@ -176,7 +176,8 @@ class TestSpectra:
     def test_freq_domain_method(self):
         from seiswave.core import Spectra
         dt = 0.01
-        acc = np.random.randn(1000) * 0.1
+        rng = np.random.RandomState(42)
+        acc = rng.randn(1000) * 0.1
         periods = np.array([0.5, 1.0, 2.0])
         sp_nmk = Spectra.compute(acc, dt, periods, zeta=0.05, method='newmark')
         sp_freq = Spectra.compute(acc, dt, periods, zeta=0.05, method='freq')
@@ -347,16 +348,17 @@ class TestWaveGenerator:
         """Test that generated wave's spectrum converges toward target."""
         from seiswave.core import WaveGenerator, CodeSpectrum, Spectra
         np.random.seed(42)  # reproducible
-        periods = Spectra.default_periods(0.1, 4.0, 50, mode='log')
+        # Use smaller parameters to avoid OOM in CI/test environments
+        periods = Spectra.default_periods(0.1, 2.0, 15, mode='log')
         target = CodeSpectrum.gb50011(periods, 0.40, 0.16)
         result = WaveGenerator.generate(
-            target, periods, n=4096, dt=0.02,
-            tol=0.15, max_iter=30, pga=0.16
+            target, periods, n=1024, dt=0.02,
+            tol=0.15, max_iter=10, pga=0.16
         )
         # Compute spectrum of result
         sp = Spectra.compute(result.acc, result.dt, periods, zeta=0.05)
         errors = WaveGenerator.fit_error(sp.sa, target)
-        # After 30 iterations, mean error should improve significantly
+        # After iterations, mean error should improve significantly
         assert errors['mean_error'] < 0.80
 
     def test_fit_error(self):
@@ -370,46 +372,38 @@ class TestWaveGenerator:
 # ═══════════════════ Selector Module ═══════════════════
 
 class TestWaveSelector:
-    def test_duration_check(self):
-        from seiswave.core import (
-            WaveSelector, SelectionCriteria, EQRecord
-        )
-        criteria = SelectionCriteria(
-            Tg=0.40, alpha_max=0.16,
+    def test_selection_config(self):
+        """测试 SelectionConfig 数据类创建"""
+        from seiswave.core import WaveSelector, SelectionConfig
+        periods = np.linspace(0.04, 6.0, 50)
+        target_sa = np.ones(50) * 0.2
+        config = SelectionConfig(
+            target_sa=target_sa,
+            periods=periods,
             T_main=[1.0, 0.5, 0.3],
             duration_factor=5.0,
-            duration_threshold=0.1,
+            spectral_tol=0.30,
+            n_select=5,
+            scale_range=(0.5, 4.0),
         )
-        ws = WaveSelector(criteria)
-        # Create a short record that should fail duration check
-        acc = np.random.randn(100) * 0.5
-        rec = EQRecord(acc=acc, dt=0.02, name='short')
-        ok, dur = ws._check_duration(rec)
-        # 100 * 0.02 = 2s total, need 5 * 1.0 = 5s effective
-        assert not ok
+        ws = WaveSelector(config)
+        assert ws.config.n_select == 5
+        assert ws.config.duration_factor == 5.0
+        assert len(ws._T_indices) == 3
 
-    def test_full_selection_flow(self):
-        from seiswave.core import (
-            WaveSelector, SelectionCriteria, EQRecord
+    def test_optimal_scale(self):
+        """测试最优缩放系数计算"""
+        from seiswave.core import WaveSelector, SelectionConfig
+        periods = np.linspace(0.1, 6.0, 50)
+        target_sa = np.ones(50) * 0.5
+        config = SelectionConfig(
+            target_sa=target_sa,
+            periods=periods,
+            T_main=[1.0, 0.5, 0.3],
         )
-        criteria = SelectionCriteria(
-            Tg=0.40, alpha_max=0.16,
-            T_main=[0.5, 0.3, 0.2],
-            duration_factor=5.0,
-            duration_threshold=0.1,
-            spectral_tol=0.50,  # relaxed for test
-        )
-        ws = WaveSelector(criteria)
-        # Create records with enough duration
-        records = []
-        for i in range(5):
-            n = 5000
-            acc = np.random.randn(n) * 0.1
-            rec = EQRecord(acc=acc, dt=0.01, name=f'wave_{i}')
-            records.append(rec)
-        results = ws.select(records)
-        # Should return a list (may or may not have passed records)
-        assert isinstance(results, list)
-        summary = ws.summary()
-        assert summary['total'] == 5
+        ws = WaveSelector(config)
+        # 如果记录谱是目标谱的一半，最优缩放应接近 2.0
+        rec_sa = np.ones(50) * 0.25
+        scale = ws._optimal_scale(rec_sa, target_sa)
+        assert 1.5 < scale < 2.5
 

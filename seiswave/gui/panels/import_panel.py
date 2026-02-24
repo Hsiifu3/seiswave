@@ -5,16 +5,19 @@
 """
 
 import os
+import glob
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
-    QPushButton, QFileDialog, QLineEdit, QComboBox, QFormLayout,
+    QPushButton, QFileDialog, QLineEdit, QComboBox,
     QSplitter, QMessageBox,
 )
 from PySide6.QtCore import Signal, Qt
 
-from seiswave.core import FileIO, EQSignal
+from seiswave.core import EQSignal
 from seiswave.gui.widgets.wave_table import WaveTable
 from seiswave.gui.widgets.plot_widget import PlotWidget
+from seiswave.gui.widgets.progress_dialog import ProgressDialog
+from seiswave.gui.workers import FileLoadWorker
 from seiswave.gui.styles import get_mpl_colors
 
 
@@ -37,10 +40,11 @@ class ImportPanel(QWidget):
         # 顶部：目录选择
         dir_group = QGroupBox("数据目录")
         dir_layout = QHBoxLayout(dir_group)
+        dir_layout.setSpacing(4)
         self._dir_edit = QLineEdit()
         self._dir_edit.setPlaceholderText("选择地震动文件目录...")
         self._dir_edit.setReadOnly(True)
-        dir_layout.addWidget(self._dir_edit)
+        dir_layout.addWidget(self._dir_edit, 1)
 
         self._browse_btn = QPushButton("浏览...")
         self._browse_btn.setProperty("secondary", True)
@@ -48,7 +52,10 @@ class ImportPanel(QWidget):
         dir_layout.addWidget(self._browse_btn)
 
         self._format_combo = QComboBox()
-        self._format_combo.addItems(["AT2 (*.AT2)", "TXT 单列 (*.txt)", "TXT 双列 (*.txt)", "CSV (*.csv)"])
+        self._format_combo.addItems([
+            "AT2 (*.AT2)", "TXT 单列 (*.txt)", "TXT 双列 (*.txt)", "CSV (*.csv)",
+        ])
+        self._format_combo.setMinimumWidth(140)
         dir_layout.addWidget(self._format_combo)
 
         self._load_btn = QPushButton("加载")
@@ -70,7 +77,7 @@ class ImportPanel(QWidget):
         preview_layout = QVBoxLayout(preview_widget)
         preview_layout.setContentsMargins(0, 0, 0, 0)
 
-        self._plot = PlotWidget(dark=self._dark)
+        self._plot = PlotWidget(dark=self._dark, show_toolbar=False)
         preview_layout.addWidget(self._plot)
 
         # 信息栏
@@ -79,7 +86,9 @@ class ImportPanel(QWidget):
         preview_layout.addWidget(self._info_label)
 
         splitter.addWidget(preview_widget)
-        splitter.setSizes([300, 400])
+        splitter.setSizes([280, 420])
+        splitter.setStretchFactor(0, 2)
+        splitter.setStretchFactor(1, 3)
 
         layout.addWidget(splitter)
 
@@ -104,7 +113,7 @@ class ImportPanel(QWidget):
             self._current_dir = dir_path
 
     def _load_files(self):
-        """加载地震动文件"""
+        """加载地震动文件（后台线程 + 进度条）"""
         dir_path = self._dir_edit.text()
         if not dir_path or not os.path.isdir(dir_path):
             QMessageBox.warning(self, "警告", "请先选择有效的数据目录")
@@ -114,38 +123,45 @@ class ImportPanel(QWidget):
         pattern_map = {0: "*.AT2", 1: "*.txt", 2: "*.txt", 3: "*.csv"}
         pattern = pattern_map[fmt_idx]
 
-        try:
-            import glob
-            files = sorted(glob.glob(os.path.join(dir_path, pattern)))
-            if not files:
-                # 尝试小写扩展名
-                pattern_lower = pattern.lower()
-                files = sorted(glob.glob(os.path.join(dir_path, pattern_lower)))
+        files = sorted(glob.glob(os.path.join(dir_path, pattern)))
+        if not files:
+            files = sorted(glob.glob(os.path.join(dir_path, pattern.lower())))
+        if not files:
+            QMessageBox.information(self, "提示", f"目录中未找到 {pattern} 文件")
+            return
 
-            if not files:
-                QMessageBox.information(self, "提示", f"目录中未找到 {pattern} 文件")
-                return
+        # 创建进度对话框
+        self._progress_dlg = ProgressDialog("加载地震动文件...", self)
 
-            signals = []
-            for f in files:
-                try:
-                    if fmt_idx == 0:  # AT2
-                        sig = EQSignal.from_at2(f)
-                    else:
-                        # txt/csv 需要 dt，默认 0.02
-                        sig = EQSignal.from_txt(f, dt=0.02,
-                                                single_col=(fmt_idx == 1))
-                    signals.append(sig)
-                except Exception:
-                    continue  # 跳过无法解析的文件
+        # 创建后台 worker
+        self._load_worker = FileLoadWorker(files, fmt_idx, parent=self)
+        self._load_worker.signals.progress.connect(self._progress_dlg.update_progress)
+        self._load_worker.signals.finished.connect(self._on_load_finished)
+        self._load_worker.signals.error.connect(self._on_load_error)
+        self._progress_dlg.cancelled.connect(self._load_worker.cancel)
 
-            self._signals = signals
-            self._table.load_signals(signals)
-            self._count_label.setText(f"已加载: {len(signals)} 条")
-            self.signals_loaded.emit(signals)
+        # 禁用加载按钮防止重复点击
+        self._load_btn.setEnabled(False)
 
-        except Exception as e:
-            QMessageBox.critical(self, "错误", f"加载失败: {e}")
+        self._load_worker.start()
+        self._progress_dlg.exec()
+
+    def _on_load_finished(self, signals):
+        """文件加载完成回调"""
+        self._signals = signals
+        self._table.load_signals(signals)
+        self._count_label.setText(f"已加载: {len(signals)} 条")
+        self.signals_loaded.emit(signals)
+        self._load_btn.setEnabled(True)
+        if hasattr(self, '_progress_dlg') and self._progress_dlg.isVisible():
+            self._progress_dlg.set_finished(f"加载完成，共 {len(signals)} 条记录")
+
+    def _on_load_error(self, error_msg):
+        """文件加载出错回调"""
+        self._load_btn.setEnabled(True)
+        if hasattr(self, '_progress_dlg') and self._progress_dlg.isVisible():
+            self._progress_dlg.close()
+        QMessageBox.critical(self, "错误", f"加载失败: {error_msg}")
 
     def _on_wave_selected(self, row):
         """选中地震波时预览"""

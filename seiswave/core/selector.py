@@ -1,378 +1,331 @@
 """
 地震波选取引擎
 
-实现三步筛选：有效持时 → 主周期偏差 → 底部剪力校核（可选）。
+三步筛选 + 反应谱匹配排序 + 贪心组合。
 
 参考：
-- MATLAB: SelectWave_0802g.m
 - GB 50011-2010 第 5.1.2 条
+- MATLAB: SelectWave_0802g.m
 """
 
 import numpy as np
 from dataclasses import dataclass, field
 from typing import Optional, Callable
 
-from .io import EQRecord
+from .peer_db import PeerRecord, PeerDatabase
 from .code_spec import CodeSpectrum
 
 
 @dataclass
-class SelectionCriteria:
-    """选波参数"""
-    Tg: float                                # 特征周期 (s)
-    alpha_max: float                         # 地震影响系数最大值
-    T_main: list[float]                      # 结构主要周期 [T1, T2, T3, ...]
-    zeta: float = 0.05                       # 阻尼比
-    duration_factor: float = 5.0             # 有效持时倍数（≥ factor × T1）
-    duration_threshold: float = 0.1          # 有效持时阈值（PGA 的百分比）
-    spectral_tol: float = 0.20               # 反应谱偏差容限（20%）
-    isolation: bool = False                  # 是否隔震结构
-    shear_check: bool = False                # 是否进行底部剪力校核
-    shear_range: tuple = (0.65, 1.35)        # 底部剪力比范围
-    mass: Optional[np.ndarray] = None        # 质量数组 (kg)，底部剪力校核用
-    stiffness: Optional[np.ndarray] = None   # 层刚度数组 (N/m)，底部剪力校核用
+class SelectionConfig:
+    """选波配置"""
+    target_sa: np.ndarray               # 目标反应谱 (g)
+    periods: np.ndarray                 # 周期数组 (s)
+    T_main: list[float]                 # 结构主周期 [T1, T2, T3]
+    zeta: float = 0.05
+    duration_factor: float = 5.0        # 有效持时 ≥ factor × max(T_main)
+    spectral_tol: float = 0.30          # 主周期点偏差容限
+    n_select: int = 5                   # 选取天然波数量
+    scale_range: tuple = (0.5, 4.0)     # PGA 缩放系数范围
+    mean_sa_ratio: float = 0.80         # 平均谱 ≥ ratio × 目标谱
+    isolation: bool = False             # 隔震模式
+    T_isolation: list = field(default_factory=list)  # 隔震周期点
 
 
 @dataclass
 class SelectionResult:
-    """单条波的筛选结果"""
-    record: EQRecord
-    effective_duration: float                # 有效持时 (s)
-    deviations: dict = field(default_factory=dict)  # 各主周期偏差 {T: deviation}
-    shear_ratio: Optional[float] = None      # 底部剪力比
+    """单条波的选取结果"""
+    record: PeerRecord
+    scale_factor: float = 1.0           # PGA 缩放系数
+    match_error: float = 0.0            # 反应谱匹配误差 (RMSE)
+    deviations: dict = field(default_factory=dict)  # 各主周期点偏差
     passed_duration: bool = False
-    passed_spectral: bool = False
-    passed_shear: bool = True                # 默认通过（不校核时）
-    passed: bool = False
+    passed_spectrum: bool = False
 
 
 class WaveSelector:
     """地震波选取引擎"""
 
-    def __init__(self, criteria: SelectionCriteria):
-        self.criteria = criteria
-        self.target_spectrum = None  # 缓存的目标规范谱值（在主周期点）
-        self.results: list[SelectionResult] = []
+    def __init__(self, config: SelectionConfig):
+        self.config = config
+        # 预计算主周期在 periods 数组中的索引
+        self._T_indices = np.array([
+            np.argmin(np.abs(config.periods - T)) for T in config.T_main
+        ])
+        # 隔震周期索引
+        if config.isolation and config.T_isolation:
+            self._T_iso_indices = np.array([
+                np.argmin(np.abs(config.periods - T))
+                for T in config.T_isolation
+            ])
+        else:
+            self._T_iso_indices = np.array([], dtype=int)
 
-    def select(self, records: list[EQRecord],
-               progress_callback: Optional[Callable] = None) -> list[SelectionResult]:
-        """执行三步筛选
+    def select(self, database: PeerDatabase,
+               progress_cb: Callable = None) -> list[SelectionResult]:
+        """自动选波主流程
+
+        1. 获取水平分量（需已有反应谱缓存）
+        2. 有效持时筛选
+        3. 最优缩放 + 主周期偏差筛选
+        4. 按匹配误差排序
+        5. 贪心选出最优 N 条组合
 
         Parameters
         ----------
-        records : list[EQRecord]
-            待筛选的地震动记录
-        progress_callback : callable, optional
-            进度回调 fn(current, total, record_name)
+        database : PeerDatabase
+            已建立索引并预计算反应谱的数据库
+        progress_cb : fn(current, total)
 
         Returns
         -------
         list[SelectionResult]
-            通过筛选的结果列表
+            选中的 N 条波
         """
-        c = self.criteria
+        cfg = self.config
+        candidates = database.get_horizontal()
+        total = len(candidates)
 
-        # 预计算目标规范谱在主周期点的值
-        T_main = np.array(c.T_main)
-        self.target_spectrum = CodeSpectrum.gb50011(
-            T_main, c.Tg, c.alpha_max, zeta=c.zeta, isolation=c.isolation
-        )
+        # 确保有反应谱
+        n_with_sa = sum(1 for r in candidates if r.sa is not None)
+        if n_with_sa == 0:
+            raise RuntimeError("数据库中无反应谱数据，请先调用 precompute_spectra()")
 
-        self.results = []
-        total = len(records)
+        # 需要将数据库的 periods 映射到 config.periods
+        db_periods = database.spectra_periods
+        if db_periods is None:
+            raise RuntimeError("数据库未设置 spectra_periods")
 
-        for idx, rec in enumerate(records):
-            if progress_callback:
-                progress_callback(idx + 1, total, rec.name)
-
-            result = SelectionResult(record=rec, effective_duration=0.0)
-
-            # Step 1: 有效持时
-            ok, dur = self._check_duration(rec)
-            result.effective_duration = dur
-            result.passed_duration = ok
-            if not ok:
-                self.results.append(result)
-                continue
-
-            # Step 2: 主周期偏差
-            ok, devs = self._check_spectral_deviation(rec)
-            result.deviations = devs
-            result.passed_spectral = ok
-            if not ok:
-                self.results.append(result)
-                continue
-
-            # Step 3: 底部剪力校核（可选）
-            if c.shear_check and c.mass is not None and c.stiffness is not None:
-                ok, ratio = self._check_base_shear(rec)
-                result.shear_ratio = ratio
-                result.passed_shear = ok
-                if not ok:
-                    self.results.append(result)
-                    continue
-
-            result.passed = True
-            self.results.append(result)
-
-        return [r for r in self.results if r.passed]
-
-    # ──────────────────── Step 1: 有效持时 ────────────────────
-
-    def _check_duration(self, rec: EQRecord) -> tuple[bool, float]:
-        """有效持时检查
-
-        有效持时定义：首次超过 PGA×threshold 到最后一次超过 PGA×threshold 的时间段。
-        要求：有效持时 ≥ duration_factor × T1
-
-        Returns
-        -------
-        (passed, effective_duration)
-        """
-        c = self.criteria
-        acc = rec.acc
-        pga = np.max(np.abs(acc))
-
-        if pga == 0:
-            return False, 0.0
-
-        # 归一化后找超过阈值的时刻
-        threshold = c.duration_threshold * pga
-        above = np.where(np.abs(acc) >= threshold)[0]
-
-        if len(above) == 0:
-            return False, 0.0
-
-        duration = (above[-1] - above[0]) * rec.dt
-        T1 = max(c.T_main)  # 最大主周期
-        required = c.duration_factor * T1
-
-        return duration >= required, duration
-
-    # ──────────────────── Step 2: 主周期偏差 ────────────────────
-
-    def _check_spectral_deviation(self, rec: EQRecord) -> tuple[bool, dict]:
-        """主周期点反应谱偏差校核
-
-        对每个主周期 Ti，计算归一化加速度反应谱值与规范谱值的偏差。
-        要求：所有主周期点偏差 ≤ spectral_tol
-
-        Returns
-        -------
-        (passed, {T: deviation})
-        """
-        c = self.criteria
-        T_main = np.array(c.T_main)
-
-        # 归一化加速度记录
-        acc = rec.acc / np.max(np.abs(rec.acc))
-
-        # 计算各主周期点的加速度反应谱值（Newmark-β）
-        sa_values = np.array([
-            self._sdof_peak_acc(acc, rec.dt, T, c.zeta)
-            for T in T_main
+        # 建立周期映射：config.periods → db_periods 的最近邻索引
+        period_map = np.array([
+            np.argmin(np.abs(db_periods - p)) for p in cfg.periods
         ])
 
-        # 计算偏差
-        deviations = {}
-        all_pass = True
-        for i, T in enumerate(T_main):
-            target = self.target_spectrum[i]
-            if target > 0:
-                dev = abs(sa_values[i] - target) / target
-            else:
-                dev = 0.0
-            deviations[T] = dev
-            if dev > c.spectral_tol:
-                all_pass = False
+        # 目标谱在主周期点的值
+        target_at_T = cfg.target_sa[self._T_indices]
 
-        return all_pass, deviations
-
-    # ──────────────────── Step 3: 底部剪力校核 ────────────────────
-
-    def _check_base_shear(self, rec: EQRecord) -> tuple[bool, float]:
-        """底部剪力校核
-
-        时程分析底部剪力 vs SRSS 振型分解法底部剪力。
-        要求：比值在 shear_range 范围内。
-
-        Returns
-        -------
-        (passed, shear_ratio)
-        """
-        c = self.criteria
-        m = np.asarray(c.mass, dtype=np.float64)
-        k = np.asarray(c.stiffness, dtype=np.float64)
-        cn = len(m)
-
-        # 构建质量矩阵和刚度矩阵
-        M = np.diag(m)
-        K = self._form_stiffness_matrix(k, cn)
-
-        # 特征值分析
-        eigenvalues, eigenvectors = np.linalg.eig(np.linalg.solve(M, K))
-        idx = np.argsort(eigenvalues)
-        eigenvalues = eigenvalues[idx]
-        eigenvectors = eigenvectors[:, idx]
-
-        periods = 2.0 * np.pi / np.sqrt(np.abs(eigenvalues))
-        periods = np.sort(periods)[::-1]  # 降序
-
-        # 振型归一化（顶层为1）
-        for i in range(cn):
-            eigenvectors[:, i] /= eigenvectors[-1, i]
-
-        # 振型参与系数
-        G = m * 9.81  # 重力
-        gamma = np.zeros(cn)
-        for i in range(cn):
-            phi = eigenvectors[:, i]
-            gamma[i] = np.sum(phi * G) / np.sum(phi ** 2 * G)
-
-        # SRSS 底部剪力
-        alpha_modes = CodeSpectrum.gb50011(
-            periods, c.Tg, c.alpha_max, zeta=c.zeta, isolation=c.isolation
-        )
-        S = np.zeros(cn)
-        for i in range(cn):
-            S[i] = np.sum(alpha_modes[i] * gamma[i] * eigenvectors[:, i] * G)
-        Fv_RS = np.sqrt(np.sum(S ** 2))
-
-        # 时程分析底部剪力
-        acc_scaled = rec.acc / np.max(np.abs(rec.acc)) * 2.0  # 归一化后缩放
-        Fv_THA = self._time_history_base_shear(acc_scaled, rec.dt, M, K, k, cn, c.zeta)
-
-        if Fv_RS > 0:
-            ratio = Fv_THA / Fv_RS
+        # 隔震周期点目标谱值
+        if cfg.isolation and len(self._T_iso_indices) > 0:
+            target_at_Tiso = cfg.target_sa[self._T_iso_indices]
         else:
-            ratio = 0.0
+            target_at_Tiso = None
 
-        lo, hi = c.shear_range
-        return lo < ratio < hi, ratio
+        # Step 1 & 2: 筛选
+        passed = []
+        for idx, rec in enumerate(candidates):
+            if progress_cb and idx % 50 == 0:
+                progress_cb(idx, total)
 
-    # ──────────────────── 辅助方法 ────────────────────
+            if rec.sa is None:
+                continue
 
-    @staticmethod
-    def _sdof_peak_acc(acc: np.ndarray, dt: float, period: float,
-                       zeta: float) -> float:
-        """Newmark-β 法计算 SDOF 系统峰值绝对加速度
+            # 有效持时检查
+            T1 = max(cfg.T_main)
+            required_dur = cfg.duration_factor * T1
+            if rec.eff_duration < required_dur:
+                continue
 
-        移植自 MATLAB SelectWave_0802g.m 的 Newmark 线性加速度法。
+            # 提取该记录在 config.periods 对应的反应谱
+            rec_sa = rec.sa[period_map]
+
+            # 最优缩放系数
+            scale = self._optimal_scale(rec_sa, cfg.target_sa)
+
+            # 缩放范围检查
+            if not (cfg.scale_range[0] <= scale <= cfg.scale_range[1]):
+                continue
+
+            # 缩放后的谱
+            scaled_sa = rec_sa * scale
+
+            # 主周期偏差检查
+            scaled_at_T = scaled_sa[self._T_indices]
+            devs = {}
+            all_pass = True
+            for i, T in enumerate(cfg.T_main):
+                if target_at_T[i] > 0:
+                    dev = abs(scaled_at_T[i] - target_at_T[i]) / target_at_T[i]
+                else:
+                    dev = 0.0
+                devs[T] = dev
+                if dev > cfg.spectral_tol:
+                    all_pass = False
+
+            # 隔震周期偏差检查
+            if cfg.isolation and target_at_Tiso is not None:
+                scaled_at_Tiso = scaled_sa[self._T_iso_indices]
+                for i, T in enumerate(cfg.T_isolation):
+                    if target_at_Tiso[i] > 0:
+                        dev = abs(scaled_at_Tiso[i] - target_at_Tiso[i]) / target_at_Tiso[i]
+                    else:
+                        dev = 0.0
+                    devs[T] = dev
+                    if dev > cfg.spectral_tol:
+                        all_pass = False
+
+            if not all_pass:
+                continue
+
+            # 匹配误差（T ≥ 0.1s 部分，避免短周期噪声）
+            mask = (cfg.target_sa > 0) & (cfg.periods >= 0.1)
+            if np.sum(mask) > 0:
+                err = np.sqrt(np.mean(
+                    ((scaled_sa[mask] - cfg.target_sa[mask]) / cfg.target_sa[mask]) ** 2
+                ))
+            else:
+                err = 999.0
+
+            passed.append(SelectionResult(
+                record=rec,
+                scale_factor=scale,
+                match_error=err,
+                deviations=devs,
+                passed_duration=True,
+                passed_spectrum=True,
+            ))
+
+        if progress_cb:
+            progress_cb(total, total)
+
+        # Step 3: 按误差排序
+        passed.sort(key=lambda r: r.match_error)
+
+        # Step 4: 贪心组合
+        if len(passed) <= cfg.n_select:
+            return passed
+
+        return self._greedy_combination(passed, cfg.n_select,
+                                         period_map, db_periods)
+
+    def _optimal_scale(self, rec_sa: np.ndarray,
+                       target_sa: np.ndarray) -> float:
+        """加权最小二乘法求最优缩放系数
+
+        主周期点权重高，确保缩放后主周期匹配好。
         """
-        omega = 2.0 * np.pi / period
-        k = omega ** 2
-        c = 2.0 * zeta * omega
-        n = len(acc)
+        cfg = self.config
+        mask = (target_sa > 0) & (rec_sa > 0) & (cfg.periods >= 0.1)
+        if np.sum(mask) < 3:
+            return 0.0
 
-        # 增量形式的 Newmark-β（线性加速度法）
-        dis = 0.0
-        vel = 0.0
-        acc_r = 0.0  # 相对加速度
-        peak_abs = 0.0
+        r = rec_sa[mask]
+        t = target_sa[mask]
+        p = cfg.periods[mask]
 
-        keff = k + 2.0 * c / dt + 4.0 / (dt ** 2)
+        # 权重：主周期附近权重高
+        w = np.ones_like(p)
+        for T in cfg.T_main:
+            w += 5.0 * np.exp(-((p - T) / (0.3 * T)) ** 2)
+        # 隔震周期也加权
+        if cfg.isolation and cfg.T_isolation:
+            for T in cfg.T_isolation:
+                w += 5.0 * np.exp(-((p - T) / (0.3 * T)) ** 2)
 
-        for i in range(n - 1):
-            da = acc[i + 1] - acc[i]
-            dp = (-da + (4.0 / dt) * vel + 2.0 * acc_r + 2.0 * c * vel)
-            ddis = dp / keff
-            dvel = 2.0 / dt * ddis - 2.0 * vel
-            dacc = 4.0 / (dt ** 2) * ddis - (4.0 / dt) * vel - 2.0 * acc_r
+        # 加权最小二乘: minimize sum(w * (scale*r - t)^2 / t^2)
+        scale = np.sum(w * r * t / t ** 2) / np.sum(w * r ** 2 / t ** 2)
+        return max(scale, 0.0)
 
-            dis += ddis
-            vel += dvel
-            acc_r += dacc
+    def _greedy_combination(self, candidates: list[SelectionResult],
+                            n: int, period_map: np.ndarray,
+                            db_periods: np.ndarray) -> list[SelectionResult]:
+        """贪心组合：确保 N 条波的平均谱满足规范要求
 
-            abs_acc = abs(acc_r + acc[i + 1])
-            if abs_acc > peak_abs:
-                peak_abs = abs_acc
+        逐条加入使组合平均谱最优的波。
+        """
+        cfg = self.config
+        mask = (cfg.target_sa > 0) & (cfg.periods >= 0.1)
+        selected = []
+        sa_sum = np.zeros(len(cfg.periods))
+        used = set()
+        used_rsns = set()
 
-        # 也检查第一个时刻
-        abs_acc_0 = abs(acc[0])
-        if abs_acc_0 > peak_abs:
-            peak_abs = abs_acc_0
+        # 合并主周期和隔震周期索引用于额外惩罚
+        all_T_indices = self._T_indices
+        if cfg.isolation and len(self._T_iso_indices) > 0:
+            all_T_indices = np.concatenate([self._T_indices, self._T_iso_indices])
 
-        return peak_abs
+        for step in range(n):
+            best_idx = -1
+            best_score = 1e30
 
-    @staticmethod
-    def _form_stiffness_matrix(k: np.ndarray, cn: int) -> np.ndarray:
-        """构建层间刚度矩阵"""
-        K = np.zeros((cn, cn))
-        for i in range(cn - 1):
-            K[i, i] = k[i] + k[i + 1]
-            K[i, i + 1] = -k[i + 1]
-            K[i + 1, i] = -k[i + 1]
-        K[cn - 1, cn - 1] = k[cn - 1]
-        return K
+            for i, cand in enumerate(candidates):
+                if i in used:
+                    continue
 
-    @staticmethod
-    def _time_history_base_shear(acc: np.ndarray, dt: float,
-                                  M: np.ndarray, K: np.ndarray,
-                                  k_story: np.ndarray, cn: int,
-                                  zeta: float) -> float:
-        """多自由度时程分析，返回底层最大剪力"""
-        # Rayleigh 阻尼
-        eigenvalues, _ = np.linalg.eig(np.linalg.solve(M, K))
-        w = np.sort(np.sqrt(np.abs(eigenvalues)))
-        w1, w2 = w[0], w[1]
-        a0 = 2.0 * w1 * w2 * (zeta * w2 - zeta * w1) / (w2 ** 2 - w1 ** 2)
-        a1 = 2.0 * (zeta * w2 - zeta * w1) / (w2 ** 2 - w1 ** 2)
-        C = a0 * M + a1 * K
+                # 避免同一 RSN 重复选取
+                if cand.record.rsn in used_rsns:
+                    continue
 
-        n = len(acc)
-        ones = np.ones(cn)
+                rec_sa = cand.record.sa[period_map] * cand.scale_factor
+                trial_sum = sa_sum + rec_sa
+                trial_mean = trial_sum / (step + 1)
 
-        # Newmark-β 时程分析
-        dis = np.zeros(cn)
-        vel = np.zeros(cn)
-        acc_r = np.zeros(cn)
+                # 评分：平均谱与目标谱的 RMSE（T ≥ 0.1s）
+                err = np.sqrt(np.mean(
+                    ((trial_mean[mask] - cfg.target_sa[mask]) / cfg.target_sa[mask]) ** 2
+                ))
 
-        Keff = K + 2.0 * C / dt + M * 4.0 / (dt ** 2)
-        Keff_inv = np.linalg.inv(Keff)
+                # 惩罚平均谱低于目标谱的情况
+                ratio_min = np.min(trial_mean[mask] / cfg.target_sa[mask])
+                if ratio_min < cfg.mean_sa_ratio:
+                    err += (cfg.mean_sa_ratio - ratio_min) * 2.0
 
-        max_base_shear = 0.0
+                # 隔震模式：额外惩罚关键周期点偏差
+                if cfg.isolation and len(all_T_indices) > 0:
+                    t_vals = cfg.target_sa[all_T_indices]
+                    m_vals = trial_mean[all_T_indices]
+                    valid = t_vals > 0
+                    if np.any(valid):
+                        key_err = np.max(np.abs(m_vals[valid] - t_vals[valid]) / t_vals[valid])
+                        err += key_err * 0.5
 
-        for i in range(n - 1):
-            da = acc[i + 1] - acc[i]
-            dp = (-M @ ones * da + (4.0 / dt) * M @ vel + 2.0 * M @ acc_r
-                  + 2.0 * C @ vel)
-            ddis = Keff_inv @ dp
-            dvel = 2.0 / dt * ddis - 2.0 * vel
-            dacc = 4.0 / (dt ** 2) * ddis - (4.0 / dt) * vel - 2.0 * acc_r
+                if err < best_score:
+                    best_score = err
+                    best_idx = i
 
-            dis += ddis
-            vel += dvel
-            acc_r += dacc
+            if best_idx < 0:
+                break
 
-            # 层间位移 → 层间剪力
-            inter_dis = np.zeros(cn)
-            inter_dis[0] = dis[0]
-            for j in range(1, cn):
-                inter_dis[j] = dis[j] - dis[j - 1]
+            used.add(best_idx)
+            cand = candidates[best_idx]
+            used_rsns.add(cand.record.rsn)
+            selected.append(cand)
+            sa_sum += cand.record.sa[period_map] * cand.scale_factor
 
-            base_shear = abs(k_story[0] * inter_dis[0])
-            if base_shear > max_base_shear:
-                max_base_shear = base_shear
+        return selected
 
-        return max_base_shear
+    def mean_spectrum(self, results: list[SelectionResult],
+                      database: PeerDatabase) -> np.ndarray:
+        """计算选中波的平均反应谱"""
+        cfg = self.config
+        db_periods = database.spectra_periods
+        period_map = np.array([
+            np.argmin(np.abs(db_periods - p)) for p in cfg.periods
+        ])
 
-    # ──────────────────── 报告与导出 ────────────────────
+        sa_list = []
+        for r in results:
+            rec_sa = r.record.sa[period_map] * r.scale_factor
+            sa_list.append(rec_sa)
 
-    def get_passed(self) -> list[SelectionResult]:
-        """获取通过筛选的结果"""
-        return [r for r in self.results if r.passed]
+        if not sa_list:
+            return np.zeros(len(cfg.periods))
+        return np.mean(sa_list, axis=0)
 
-    def summary(self) -> dict:
-        """生成筛选摘要"""
-        total = len(self.results)
-        passed_dur = sum(1 for r in self.results if r.passed_duration)
-        passed_spec = sum(1 for r in self.results if r.passed_spectral)
-        passed_all = sum(1 for r in self.results if r.passed)
+    def envelope_spectrum(self, results: list[SelectionResult],
+                          database: PeerDatabase) -> np.ndarray:
+        """计算选中波的包络反应谱"""
+        cfg = self.config
+        db_periods = database.spectra_periods
+        period_map = np.array([
+            np.argmin(np.abs(db_periods - p)) for p in cfg.periods
+        ])
 
-        return {
-            "total": total,
-            "passed_duration": passed_dur,
-            "passed_spectral": passed_spec,
-            "passed_all": passed_all,
-            "passed_names": [r.record.name for r in self.results if r.passed],
-        }
+        sa_list = []
+        for r in results:
+            rec_sa = r.record.sa[period_map] * r.scale_factor
+            sa_list.append(rec_sa)
+
+        if not sa_list:
+            return np.zeros(len(cfg.periods))
+        return np.max(sa_list, axis=0)
