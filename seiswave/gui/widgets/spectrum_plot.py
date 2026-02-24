@@ -28,7 +28,7 @@ class SpectrumPlot(PlotWidget):
             self.ax.set_xscale('log')
         else:
             self.ax.set_xscale('linear')
-        self.ax.set_xlim(0.01, 10)
+        self.ax.set_xlim(0.01, 6.0)
 
     def clear(self):
         super().clear()

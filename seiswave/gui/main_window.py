@@ -231,6 +231,18 @@ class MainWindow(QMainWindow):
         export_action.triggered.connect(lambda: self._set_step(3))
         file_menu.addAction(export_action)
 
+        view_menu = menubar.addMenu("视图(&V)")
+        self._theme_action = QAction("深色模式", self)
+        self._theme_action.setCheckable(True)
+        self._theme_action.setChecked(self._dark)
+        self._theme_action.triggered.connect(self._toggle_theme)
+        view_menu.addAction(self._theme_action)
+
+        help_menu = menubar.addMenu("帮助(&H)")
+        about_action = QAction("关于 SeisWave(&A)", self)
+        about_action.triggered.connect(self._show_about)
+        help_menu.addAction(about_action)
+
     def _setup_statusbar(self):
         self._statusbar = QStatusBar()
         self.setStatusBar(self._statusbar)
@@ -317,6 +329,12 @@ class MainWindow(QMainWindow):
     def _toggle_theme(self):
         self._dark = self._theme_action.isChecked()
         self._apply_theme()
+        for panel in [self._sidebar, self._import_panel, self._selector_panel,
+                      self._generator_panel, self._signal_panel,
+                      self._combine_panel, self._result_panel,
+                      self._summary_panel, self._shared_plot]:
+            if hasattr(panel, 'set_dark'):
+                panel.set_dark(self._dark)
 
     def _apply_theme(self):
         QApplication.instance().setStyleSheet(get_theme(self._dark))

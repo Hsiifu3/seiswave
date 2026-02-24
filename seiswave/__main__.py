@@ -5,9 +5,34 @@ python -m seiswave 启动 GUI 应用。
 """
 
 import sys
+import logging
+import traceback
+import faulthandler
+
+# faulthandler 捕获 C 层 segfault
+_fault_log = open('/tmp/seiswave_fault.log', 'w')
+faulthandler.enable(file=_fault_log, all_threads=True)
+
+# 配置日志到文件
+logging.basicConfig(
+    filename='/tmp/seiswave.log',
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    force=True,
+)
+logger = logging.getLogger('seiswave')
+
+# 全局异常捕获
+def _excepthook(exc_type, exc_value, exc_tb):
+    msg = ''.join(traceback.format_exception(exc_type, exc_value, exc_tb))
+    logger.critical(f"Uncaught exception:\n{msg}")
+    sys.__excepthook__(exc_type, exc_value, exc_tb)
+
+sys.excepthook = _excepthook
 
 
 def main():
+    logger.info("SeisWave starting...")
     import multiprocessing
     multiprocessing.set_start_method('spawn', force=True)
 

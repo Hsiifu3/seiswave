@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QSplitter, QTableWidget, QTableWidgetItem, QHeaderView,
     QAbstractItemView, QMessageBox, QFileDialog, QLineEdit,
     QProgressBar, QSizePolicy, QComboBox, QTabWidget,
+    QScrollArea,
 )
 from PySide6.QtCore import Signal, Qt
 
@@ -45,12 +46,17 @@ class SelectorPanel(QWidget):
 
     def _setup_ui(self):
         layout = QHBoxLayout(self)
-        # ── 左侧参数区 ──
+        layout.setContentsMargins(8, 8, 8, 8)
+        # ── 左侧参数区（带滚动） ──
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setMinimumWidth(360)
+        scroll.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         param_widget = QWidget()
-        param_widget.setMinimumWidth(340)
-        param_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         param_layout = QVBoxLayout(param_widget)
-        param_layout.setContentsMargins(0, 0, 0, 0)
+        param_layout.setContentsMargins(0, 0, 4, 0)
         # ── 数据源 ──
         source_group = QGroupBox("选波数据源")
         source_form = QFormLayout(source_group)
@@ -111,9 +117,24 @@ class SelectorPanel(QWidget):
         # ── 结构周期 ──
         period_group = QGroupBox("结构周期")
         pf = QFormLayout(period_group)
-        self._t1_spin = QDoubleSpinBox(); self._t1_spin.setRange(0.01, 10.0); self._t1_spin.setValue(1.0)
-        self._t2_spin = QDoubleSpinBox(); self._t2_spin.setRange(0.01, 10.0); self._t2_spin.setValue(0.5)
-        self._t3_spin = QDoubleSpinBox(); self._t3_spin.setRange(0.01, 10.0); self._t3_spin.setValue(0.3)
+        pf.setLabelAlignment(Qt.AlignRight)
+        pf.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+
+        self._t1_spin = QDoubleSpinBox()
+        self._t1_spin.setRange(0.01, 10.0)
+        self._t1_spin.setValue(1.0)
+        self._t1_spin.setFixedWidth(120)
+
+        self._t2_spin = QDoubleSpinBox()
+        self._t2_spin.setRange(0.01, 10.0)
+        self._t2_spin.setValue(0.5)
+        self._t2_spin.setFixedWidth(120)
+
+        self._t3_spin = QDoubleSpinBox()
+        self._t3_spin.setRange(0.01, 10.0)
+        self._t3_spin.setValue(0.3)
+        self._t3_spin.setFixedWidth(120)
+
         pf.addRow("T₁ (s):", self._t1_spin)
         pf.addRow("T₂ (s):", self._t2_spin)
         pf.addRow("T₃ (s):", self._t3_spin)
@@ -122,15 +143,44 @@ class SelectorPanel(QWidget):
         # ── 筛选条件 ──
         filter_group = QGroupBox("筛选条件")
         ff = QFormLayout(filter_group)
-        self._n_select_spin = QSpinBox(); self._n_select_spin.setRange(1, 20); self._n_select_spin.setValue(5)
-        self._dur_factor_spin = QDoubleSpinBox(); self._dur_factor_spin.setRange(1.0, 20.0); self._dur_factor_spin.setValue(5.0)
-        self._tol_spin = QDoubleSpinBox(); self._tol_spin.setRange(0.10, 0.50); self._tol_spin.setValue(0.30); self._tol_spin.setSingleStep(0.05)
-        self._scale_lo_spin = QDoubleSpinBox(); self._scale_lo_spin.setRange(0.1, 2.0); self._scale_lo_spin.setValue(0.5)
-        self._scale_hi_spin = QDoubleSpinBox(); self._scale_hi_spin.setRange(1.0, 10.0); self._scale_hi_spin.setValue(4.0)
+        ff.setLabelAlignment(Qt.AlignRight)
+        ff.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
 
-        # 持时范围
-        self._dur_lo_spin = QDoubleSpinBox(); self._dur_lo_spin.setRange(0.0, 200.0); self._dur_lo_spin.setValue(0.0)
-        self._dur_hi_spin = QDoubleSpinBox(); self._dur_hi_spin.setRange(0.0, 200.0); self._dur_hi_spin.setValue(200.0)
+        self._n_select_spin = QSpinBox()
+        self._n_select_spin.setRange(1, 20)
+        self._n_select_spin.setValue(5)
+        self._n_select_spin.setFixedWidth(120)
+
+        self._dur_factor_spin = QDoubleSpinBox()
+        self._dur_factor_spin.setRange(1.0, 20.0)
+        self._dur_factor_spin.setValue(5.0)
+        self._dur_factor_spin.setFixedWidth(120)
+
+        self._tol_spin = QDoubleSpinBox()
+        self._tol_spin.setRange(0.10, 0.50)
+        self._tol_spin.setValue(0.30)
+        self._tol_spin.setSingleStep(0.05)
+        self._tol_spin.setFixedWidth(120)
+
+        self._scale_lo_spin = QDoubleSpinBox()
+        self._scale_lo_spin.setRange(0.1, 2.0)
+        self._scale_lo_spin.setValue(0.5)
+        self._scale_lo_spin.setFixedWidth(120)
+
+        self._scale_hi_spin = QDoubleSpinBox()
+        self._scale_hi_spin.setRange(1.0, 10.0)
+        self._scale_hi_spin.setValue(4.0)
+        self._scale_hi_spin.setFixedWidth(120)
+
+        self._dur_lo_spin = QDoubleSpinBox()
+        self._dur_lo_spin.setRange(0.0, 200.0)
+        self._dur_lo_spin.setValue(0.0)
+        self._dur_lo_spin.setFixedWidth(120)
+
+        self._dur_hi_spin = QDoubleSpinBox()
+        self._dur_hi_spin.setRange(0.0, 200.0)
+        self._dur_hi_spin.setValue(200.0)
+        self._dur_hi_spin.setFixedWidth(120)
 
         ff.addRow("选取数量:", self._n_select_spin)
         ff.addRow("持时倍数:", self._dur_factor_spin)
@@ -148,7 +198,8 @@ class SelectorPanel(QWidget):
         param_layout.addWidget(self._run_btn)
         param_layout.addWidget(self._stat_label)
         param_layout.addStretch()
-        layout.addWidget(param_widget)
+        scroll.setWidget(param_widget)
+        layout.addWidget(scroll)
         # ── 右侧：结果表 + 对比图 ──
         right_splitter = QSplitter(Qt.Vertical)
         self._plot = SpectrumPlot(dark=self._dark, log_x=False, show_toolbar=False)
