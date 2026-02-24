@@ -33,6 +33,49 @@ class EQRecord:
         self.npts = len(self.acc)
 
 
+def parse_peer_filename(filename: str) -> dict:
+    """从 PEER NGA 文件名解析元数据
+
+    文件名格式示例：RSN1004_NORTHR_SPV270.AT2
+    - RSN1004 → rsn=1004
+    - NORTHR → event_tag='NORTHR'
+    - SPV270 → station_tag='SPV270'
+
+    Parameters
+    ----------
+    filename : str
+        文件名（可含路径，自动取 basename）
+
+    Returns
+    -------
+    dict
+        包含 rsn, event_tag, station_tag, component 字段
+    """
+    basename = os.path.splitext(os.path.basename(filename))[0]
+    result = {'rsn': 0, 'event_tag': '', 'station_tag': '', 'component': ''}
+
+    # 解析 RSN
+    m = re.match(r'RSN(\d+)_(.*)', basename)
+    if m:
+        result['rsn'] = int(m.group(1))
+        rest = m.group(2)
+    else:
+        rest = basename
+
+    # 拆分剩余部分：EVENT_STATION（最后一个下划线分隔台站+分量）
+    parts = rest.split('_')
+    if len(parts) >= 2:
+        result['event_tag'] = '_'.join(parts[:-1])
+        result['station_tag'] = parts[-1]
+        # 分量方向：台站标识中的数字后缀或 UP/DWN 等
+        comp = parts[-1]
+        result['component'] = comp
+    elif len(parts) == 1:
+        result['event_tag'] = parts[0]
+
+    return result
+
+
 class FileIO:
     """地震动文件读写"""
 
@@ -78,6 +121,36 @@ class FileIO:
             'header2': lines[1].strip(),
             'header3': lines[2].strip(),
         }
+
+        # 从文件名解析 RSN、事件缩写、台站缩写
+        fn_meta = parse_peer_filename(filepath)
+        metadata['rsn'] = fn_meta['rsn']
+        metadata['event_tag'] = fn_meta['event_tag']
+        metadata['station_tag'] = fn_meta['station_tag']
+
+        # 从第2行解析完整元数据：Event, Date, Station, Component
+        h2 = lines[1].strip()
+        h2_parts = [p.strip() for p in h2.split(',')]
+        if len(h2_parts) >= 4:
+            metadata['event'] = h2_parts[0]
+            metadata['date'] = h2_parts[1]
+            metadata['station'] = h2_parts[2]
+            metadata['component'] = h2_parts[3]
+        elif len(h2_parts) == 3:
+            metadata['event'] = h2_parts[0]
+            metadata['date'] = h2_parts[1]
+            metadata['station'] = h2_parts[2]
+            metadata['component'] = fn_meta['component']
+        elif len(h2_parts) == 2:
+            metadata['event'] = h2_parts[0]
+            metadata['station'] = h2_parts[1]
+            metadata['date'] = ''
+            metadata['component'] = fn_meta['component']
+        else:
+            metadata['event'] = h2
+            metadata['station'] = ''
+            metadata['date'] = ''
+            metadata['component'] = fn_meta['component']
 
         # 解析第4行：NPTS 和 DT
         header4 = lines[3].strip()
