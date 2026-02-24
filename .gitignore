@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.claude/
+.task/
+.pytest_cache/
+build/
+data/peer_nga/
+*.egg-info/
+dist/

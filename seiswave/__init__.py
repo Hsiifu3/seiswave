@@ -7,7 +7,8 @@ SeisWave - 地震信号处理与选波工具包
 from .core import (
     EQSignal, Spectra, Filter, WaveGenerator,
     FileIO, EQRecord, CodeSpectrum,
-    WaveSelector, SelectionCriteria, SelectionResult,
+    WaveSelector, SelectionConfig, SelectionResult,
+    PeerDatabase, PeerRecord, Combiner, WaveGroup,
     FFT, Response,
 )
 
@@ -22,8 +23,12 @@ __all__ = [
     'EQRecord',
     'CodeSpectrum',
     'WaveSelector',
-    'SelectionCriteria',
+    'SelectionConfig',
     'SelectionResult',
+    'PeerDatabase',
+    'PeerRecord',
+    'Combiner',
+    'WaveGroup',
     'FFT',
     'Response',
 ]

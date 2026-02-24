@@ -146,3 +146,16 @@ seiswave/
 ## 许可证 / License
 
 MIT License. See [LICENSE](LICENSE) for details.
+
+---
+
+## Claude Code Hooks 异步开发（OpenClaw）
+
+本项目集成了 Claude Code Hooks 机制，实现"派发任务 → 后台执行 → 自动回报"的零轮询异步开发流程：
+
+- **`scripts/dispatch-claude.sh`**：异步派发脚本。接收任务描述后在后台启动 `claude -p`（非交互模式），主进程立即返回不阻塞终端。
+- **`.claude/hooks/on-task-complete.sh`**：任务完成钩子。Claude Code 结束时自动触发，将会话 ID、事件类型、时间戳等信息写入结果文件，并唤醒 OpenClaw。
+- **`results/latest.json`**（位于 `.claude/results/latest.json`）：每次 Hook 触发后写入的结构化结果快照，包含 `timestamp`、`session_id`、`event`、`status` 等字段，供下游系统读取。
+- **`openclaw system event wake`**：Hook 末尾调用 OpenClaw CLI 发送系统事件通知，告知 OpenClaw "Claude Code 任务已完成，请读取 latest.json"，从而驱动后续自动化流程。
+
+典型用法：`./scripts/dispatch-claude.sh "修复人工波生成报错"` — 任务在后台运行，完成后 Hook 自动写结果并唤醒 OpenClaw，全程无需手动轮询。

@@ -75,7 +75,7 @@ class Spectra:
 
     @staticmethod
     def compute(acc: np.ndarray, dt: float, periods: np.ndarray,
-                zeta: float = 0.05, method: str = "newmark") -> 'Spectra':
+                zeta: float = 0.05, method: str = "mixed") -> 'Spectra':
         """计算反应谱
 
         Parameters
@@ -91,7 +91,7 @@ class Spectra:
         method : str
             "newmark" = Newmark-β 平均加速度法
             "freq" = 频域法
-            "mixed" = 短周期频域 + 长周期 Newmark
+            "mixed" = 短周期频域 + 长周期 Newmark（默认，优先 Fortran 加速）
 
         Returns
         -------
@@ -102,6 +102,15 @@ class Spectra:
         acc = np.asarray(acc, dtype=np.float64)
         n_periods = len(periods)
 
+        # Fortran 加速路径（mixed 方法）
+        if method == "mixed":
+            from .fortran_bridge import HAS_FORTRAN, spectrum_avd
+            if HAS_FORTRAN:
+                sp.sa, _, sp.sv, sp.sd, sp.se = spectrum_avd(
+                    acc, dt, zeta, periods)
+                return sp
+
+        # Python 回退路径
         sp.sa = np.zeros(n_periods)
         sp.sv = np.zeros(n_periods)
         sp.sd = np.zeros(n_periods)
@@ -113,16 +122,15 @@ class Spectra:
             elif method == "freq":
                 ra, rv, rd = Spectra._freq_domain(acc, dt, T, zeta)
             elif method == "mixed":
-                # 短周期用频域（快），长周期用 Newmark（准）
-                if T < 0.5:
+                threshold = 20.0 * dt
+                if T < threshold:
                     ra, rv, rd = Spectra._freq_domain(acc, dt, T, zeta)
                 else:
                     ra, rv, rd = Spectra._newmark_beta(acc, dt, T, zeta)
             else:
                 raise ValueError(f"未知的计算方法: {method}")
 
-            # 绝对加速度 = 相对加速度 + 地面加速度
-            abs_acc = ra + acc[:len(ra)]
+            abs_acc = -ra + acc[:len(ra)]
             sp.sa[i] = np.max(np.abs(abs_acc))
             sp.sv[i] = np.max(np.abs(rv))
             sp.sd[i] = np.max(np.abs(rd))
@@ -138,7 +146,7 @@ class Spectra:
         """Newmark-β 平均加速度法计算 SDOF 响应
 
         使用 γ=0.5, β=0.25（平均加速度法，无条件稳定）。
-        同 EQSignal C++ rnmk() 和 MATLAB Newmark.m。
+        复现 EQSignal newmark()：当 MPR*dt > T 时自动子步插值。
 
         Parameters
         ----------
@@ -156,51 +164,78 @@ class Spectra:
         tuple[np.ndarray, np.ndarray, np.ndarray]
             (相对加速度, 相对速度, 相对位移)
         """
+        MPR = 20  # 与 EQSignal 一致
+
         omega = 2.0 * np.pi / period
-        k = omega ** 2       # 单位质量下的刚度
-        c = 2.0 * zeta * omega  # 单位质量下的阻尼
+        k = omega ** 2
+        c = 2.0 * zeta * omega
 
         n = len(acc)
+
+        # 子步插值（复现 EQSignal newmark）
+        if dt * MPR > period:
+            r = int(np.ceil(MPR * dt / period))
+            sub_dt = dt / r
+        else:
+            r = 1
+            sub_dt = dt
+
+        # Newmark-β 参数（平均加速度法）
+        beta = 0.25
+        gamma = 0.5
+
+        b1 = 1.0 / (beta * sub_dt ** 2)
+        b2 = 1.0 / (beta * sub_dt)
+        b3 = 1.0 / (2.0 * beta) - 1.0
+        b4 = gamma / (beta * sub_dt)
+        b5 = gamma / beta - 1.0
+        b6 = 0.5 * sub_dt * (gamma / beta - 2.0)
+        b7 = sub_dt * (1.0 - gamma)
+        b8 = sub_dt * gamma
+
+        keff = k + b1 + b4 * c
+        kinv = 1.0 / keff
+
+        # 状态变量：[位移, 速度, 加速度]
+        rl = np.zeros(3)  # 上一步
         rd = np.zeros(n)
         rv = np.zeros(n)
         ra = np.zeros(n)
 
-        # 初始条件
-        ra[0] = -acc[0] - c * rv[0] - k * rd[0]
+        al = 0.0  # 上一步加速度（用于子步插值）
 
-        # Newmark-β 参数（平均加速度法）
-        gamma = 0.5
-        beta = 0.25
+        for i in range(n):
+            ac = acc[i]
+            da = (ac - al) / r
 
-        a1 = 1.0 / (beta * dt ** 2)
-        a2 = 1.0 / (beta * dt)
-        a3 = (1.0 - 2.0 * beta) / (2.0 * beta)
+            for j in range(1, r + 1):
+                ac_sub = al + da * j
+                feff = ac_sub + (b1 * rl[0] + b2 * rl[1] + b3 * rl[2]) \
+                       + c * (b4 * rl[0] + b5 * rl[1] + b6 * rl[2])
+                rc0 = feff * kinv
+                rc1 = b4 * (rc0 - rl[0]) - b5 * rl[1] - b6 * rl[2]
+                rc2 = ac_sub - k * rc0 - c * rc1
+                rl[0] = rc0
+                rl[1] = rc1
+                rl[2] = rc2
 
-        a4 = gamma / (beta * dt)
-        a5 = 1.0 - gamma / beta
-        a6 = (1.0 - gamma / (2.0 * beta)) * dt
-
-        # 有效刚度
-        keff = k + a1 + c * a4
-
-        for i in range(1, n):
-            # 有效荷载
-            p_eff = (-acc[i]
-                     + a1 * rd[i - 1] + a2 * rv[i - 1] + a3 * ra[i - 1]
-                     + c * (a4 * rd[i - 1] + a5 * rv[i - 1] + a6 * ra[i - 1]))
-
-            rd[i] = p_eff / keff
-            ra[i] = a1 * (rd[i] - rd[i - 1]) - a2 * rv[i - 1] - a3 * ra[i - 1]
-            rv[i] = a4 * (rd[i] - rd[i - 1]) + a5 * rv[i - 1] + a6 * ra[i - 1]
+            # 记录每个原始时间步的结果
+            rd[i] = rl[0]
+            rv[i] = rl[1]
+            ra[i] = rl[2]
+            al = acc[i]
 
         return ra, rv, rd
 
     @staticmethod
     def _freq_domain(acc: np.ndarray, dt: float, period: float,
                      zeta: float) -> tuple:
-        """频域法计算 SDOF 响应
+        """频域法计算 SDOF 响应（与 Fortran rfreq 一致）
 
         通过 FFT 在频域应用 SDOF 传递函数，再 IFFT 回时域。
+        返回值约定与 _newmark_beta 一致：
+        - ra = ag - k*u - c*v（使得 abs_acc = -ra + ag = k*u + c*v）
+        - rv, rd 为相对速度和位移（取负号，与 Fortran rnmk 一致）
 
         Parameters
         ----------
@@ -216,37 +251,53 @@ class Spectra:
         Returns
         -------
         tuple[np.ndarray, np.ndarray, np.ndarray]
-            (相对加速度, 相对速度, 相对位移)
+            (ra, rv, rd) 与 _newmark_beta 同约定
         """
         n = len(acc)
         nfft = 1 << int(np.ceil(np.log2(n)))  # next power of 2
 
         omega_n = 2.0 * np.pi / period
-        k = omega_n ** 2
-        c_damp = 2.0 * zeta * omega_n
 
-        # FFT
-        acc_fft = np.fft.fft(acc, nfft)
-        freqs = np.fft.fftfreq(nfft, dt)
-        omega = 2.0 * np.pi * freqs
+        # FFT（使用 rfft，与 Fortran fftw r2c 一致）
+        a0 = np.zeros(nfft)
+        a0[:n] = acc
+        af = np.fft.rfft(a0)
 
-        # SDOF 传递函数 H(ω) = -1 / (k - ω² + 2iζω_n·ω)
-        # 位移传递函数：X/Ag = -1 / (ω_n² - ω² + 2iζω_nω)
-        denom = k - omega ** 2 + 2j * zeta * omega_n * omega
-        # 避免除零
-        denom[np.abs(denom) < 1e-30] = 1e-30
+        fs = 1.0 / dt
+        df = fs / nfft
+        w = np.zeros(nfft // 2 + 1)
+        w[1:] = 2.0 * np.pi * np.arange(1, nfft // 2 + 1) * df
 
-        H_d = -1.0 / denom
-        H_v = 1j * omega * H_d
-        H_a = -omega ** 2 * H_d
+        w0 = omega_n
+        w0i2 = w0 * w0
+        wj2 = w * w
+        w0iwj = w0 * w
 
-        rd_fft = acc_fft * H_d
-        rv_fft = acc_fft * H_v
-        ra_fft = acc_fft * H_a
+        # Fortran rfreq 传递函数（直接输出绝对加速度、相对速度、相对位移）
+        denom = w0i2 - wj2 + 2.0j * zeta * w0iwj
+        denom[np.abs(denom) < 1e-30] = 1e-30 + 0j
 
-        rd = np.real(np.fft.ifft(rd_fft))[:n]
-        rv = np.real(np.fft.ifft(rv_fft))[:n]
-        ra = np.real(np.fft.ifft(ra_fft))[:n]
+        # 绝对加速度传递函数：(w0^2 + 2i*zeta*w0*wj) / denom
+        raf = af * (w0i2 + 2.0j * zeta * w0iwj) / denom
+        # 相对速度传递函数：-i*wj / denom
+        rvf = af * (-1.0j * w) / denom
+        # 相对位移传递函数：-1 / denom
+        rdf = af * (-1.0) / denom
+
+        ra_abs = np.fft.irfft(raf, nfft)[:n]
+        rv_rel = np.fft.irfft(rvf, nfft)[:n]
+        rd_rel = np.fft.irfft(rdf, nfft)[:n]
+
+        # 转换为与 _newmark_beta 一致的约定：
+        # _newmark_beta: ra = rc(3) = ag - k*u - c*v
+        # abs_acc = -ra + ag = k*u + c*v = ra_abs（Fortran rnmk 的 -rc(3)+ac）
+        # 所以 ra = ag - ra_abs
+        # _newmark_beta: rv = rc(2), rd = rc(1)（相对值，不取负号）
+        # Fortran rnmk: rv(i) = -rc(2), rd(i) = -rc(1)
+        # 但 compute() 用的是 abs(rv) 和 abs(rd)，符号不影响谱值
+        ra = acc[:n] - ra_abs  # 使得 -ra + acc = ra_abs
+        rv = rv_rel
+        rd = rd_rel
 
         return ra, rv, rd
 

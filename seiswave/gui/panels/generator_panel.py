@@ -8,9 +8,9 @@ import numpy as np
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
     QDoubleSpinBox, QSpinBox, QFormLayout, QPushButton, QComboBox,
-    QMessageBox,
+    QMessageBox, QSplitter, QSizePolicy,
 )
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, Qt
 
 from seiswave.core import WaveGenerator, Spectra
 from seiswave.gui.widgets.spectrum_plot import SpectrumPlot
@@ -32,6 +32,7 @@ class GeneratorPanel(QWidget):
         self._code_sa = None
         self._generated = None
         self._worker = None
+        self._progress = None
         self._setup_ui()
 
     def _setup_ui(self):
@@ -40,26 +41,33 @@ class GeneratorPanel(QWidget):
 
         # 左侧参数面板
         param_widget = QWidget()
-        param_widget.setFixedWidth(320)
+        param_widget.setMinimumWidth(290)
+        param_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         param_layout = QVBoxLayout(param_widget)
         param_layout.setContentsMargins(0, 0, 0, 0)
 
         # 目标谱
         target_group = QGroupBox("目标谱")
         target_form = QFormLayout(target_group)
+        target_form.setLabelAlignment(Qt.AlignRight)
+        target_form.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
         self._target_combo = QComboBox()
-        self._target_combo.addItems(["当前规范谱", "自定义谱（CSV）"])
+        self._target_combo.addItems(["当前规范谱"])
+        self._target_combo.setEnabled(False)
         target_form.addRow("目标谱来源:", self._target_combo)
         param_layout.addWidget(target_group)
 
         # 生成参数
         gen_group = QGroupBox("生成参数")
         gen_form = QFormLayout(gen_group)
+        gen_form.setLabelAlignment(Qt.AlignRight)
+        gen_form.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
 
         self._npts_spin = QSpinBox()
         self._npts_spin.setRange(1024, 32768)
         self._npts_spin.setSingleStep(1024)
         self._npts_spin.setValue(4096)
+        self._npts_spin.setFixedWidth(120)
         gen_form.addRow("数据点数:", self._npts_spin)
 
         self._dt_spin = QDoubleSpinBox()
@@ -67,6 +75,7 @@ class GeneratorPanel(QWidget):
         self._dt_spin.setSingleStep(0.005)
         self._dt_spin.setValue(0.02)
         self._dt_spin.setDecimals(3)
+        self._dt_spin.setFixedWidth(120)
         gen_form.addRow("时间步长 Δt (s):", self._dt_spin)
 
         self._pga_spin = QDoubleSpinBox()
@@ -74,6 +83,7 @@ class GeneratorPanel(QWidget):
         self._pga_spin.setSingleStep(0.05)
         self._pga_spin.setValue(0.20)
         self._pga_spin.setDecimals(3)
+        self._pga_spin.setFixedWidth(120)
         gen_form.addRow("目标 PGA (g):", self._pga_spin)
 
         self._zeta_spin = QDoubleSpinBox()
@@ -81,6 +91,7 @@ class GeneratorPanel(QWidget):
         self._zeta_spin.setSingleStep(0.01)
         self._zeta_spin.setValue(0.05)
         self._zeta_spin.setDecimals(2)
+        self._zeta_spin.setFixedWidth(120)
         gen_form.addRow("阻尼比 ζ:", self._zeta_spin)
 
         param_layout.addWidget(gen_group)
@@ -88,24 +99,28 @@ class GeneratorPanel(QWidget):
         # 迭代参数
         iter_group = QGroupBox("迭代控制")
         iter_form = QFormLayout(iter_group)
+        iter_form.setLabelAlignment(Qt.AlignRight)
+        iter_form.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
 
         self._tol_spin = QDoubleSpinBox()
         self._tol_spin.setRange(0.01, 0.20)
         self._tol_spin.setSingleStep(0.01)
         self._tol_spin.setValue(0.05)
         self._tol_spin.setDecimals(2)
+        self._tol_spin.setFixedWidth(120)
         iter_form.addRow("收敛容限:", self._tol_spin)
 
         self._maxiter_spin = QSpinBox()
         self._maxiter_spin.setRange(10, 200)
         self._maxiter_spin.setSingleStep(10)
         self._maxiter_spin.setValue(50)
+        self._maxiter_spin.setFixedWidth(120)
         iter_form.addRow("最大迭代次数:", self._maxiter_spin)
 
         param_layout.addWidget(iter_group)
 
         # 执行按钮
-        self._run_btn = QPushButton("▶ 生成人工波")
+        self._run_btn = QPushButton("生成人工波")
         self._run_btn.clicked.connect(self._run_generation)
         param_layout.addWidget(self._run_btn)
 
@@ -118,19 +133,20 @@ class GeneratorPanel(QWidget):
         layout.addWidget(param_widget)
 
         # 右侧绘图区（上下分割）
-        from PySide6.QtWidgets import QSplitter
-        from PySide6.QtCore import Qt
         right_splitter = QSplitter(Qt.Vertical)
 
         # 反应谱对比图
-        self._spec_plot = SpectrumPlot(dark=self._dark)
+        self._spec_plot = SpectrumPlot(dark=self._dark, log_x=False,
+                                       show_toolbar=False)
         right_splitter.addWidget(self._spec_plot)
 
         # 时程曲线图
-        self._time_plot = PlotWidget(dark=self._dark)
+        self._time_plot = PlotWidget(dark=self._dark, show_toolbar=False)
         right_splitter.addWidget(self._time_plot)
 
         right_splitter.setSizes([400, 300])
+        right_splitter.setStretchFactor(0, 3)
+        right_splitter.setStretchFactor(1, 2)
         layout.addWidget(right_splitter, 1)
 
     def set_code_spectrum(self, periods, sa):
@@ -152,7 +168,8 @@ class GeneratorPanel(QWidget):
         periods = self._code_periods
         target = self._code_sa
 
-        progress = ProgressDialog("人工波生成中...", self)
+        self._progress = ProgressDialog("人工波生成中...", self)
+        self._run_btn.setEnabled(False)
 
         self._worker = GeneratorWorker(
             target, periods,
@@ -164,55 +181,65 @@ class GeneratorPanel(QWidget):
             max_iter=self._maxiter_spin.value(),
             parent=self,
         )
-        self._worker.signals.progress.connect(progress.update_progress)
-        self._worker.signals.finished.connect(
-            lambda result: self._on_generation_done(result, progress))
-        self._worker.signals.error.connect(
-            lambda err: self._on_generation_error(err, progress))
+        self._worker.signals.progress.connect(self._progress.update_progress)
+        self._worker.signals.finished.connect(self._on_generation_done)
+        self._worker.signals.error.connect(self._on_generation_error)
+        self._progress.cancelled.connect(self._worker.cancel)
 
         self._worker.start()
-        progress.exec()
+        self._progress.show()
 
-        if progress.is_cancelled and self._worker:
-            self._worker.cancel()
-
-    def _on_generation_done(self, signal, progress):
+    def _on_generation_done(self, signal):
         self._generated = signal
-        progress.set_finished("生成完成")
+        self._run_btn.setEnabled(True)
 
-        # 计算生成波的反应谱
-        spec = Spectra.compute(signal.acc, signal.dt, self._code_periods, 0.05)
-        fit = WaveGenerator.fit_error(spec.sa, self._code_sa)
+        if self._progress:
+            self._progress.close()
+            self._progress = None
 
-        self._info_label.setText(
-            f"PGA = {signal.pga:.4f} g\n"
-            f"持时 = {signal.duration:.2f} s\n"
-            f"最大偏差 = {fit['max_dev']:.1%}\n"
-            f"均方根偏差 = {fit['rms_dev']:.1%}"
-        )
-
-        # 绘制反应谱对比
-        self._spec_plot.clear()
-        self._spec_plot.plot_code_spectrum(self._code_periods, self._code_sa, label="目标谱")
-        colors = get_mpl_colors(self._dark)
-        self._spec_plot.plot_spectrum(self._code_periods, spec.sa,
-                                     label="生成波", color=colors['primary'], linewidth=2.0)
-        self._spec_plot.ax.set_title("反应谱拟合对比", fontsize=11)
-        self._spec_plot.refresh()
-
-        # 绘制时程曲线
-        self._time_plot.clear()
-        ax = self._time_plot.ax
-        ax.plot(signal.time, signal.acc, color=colors['primary'], linewidth=0.6)
-        ax.set_xlabel("时间 (s)")
-        ax.set_ylabel("加速度 (g)")
-        ax.set_title("生成的人工地震波", fontsize=11)
-        self._time_plot.refresh()
-
+        # 先发射信号，确保即使绘图失败数据也能传递
         self.wave_generated.emit(signal)
 
-    def _on_generation_error(self, err, progress):
-        progress.set_finished(f"生成出错: {err}")
+        try:
+            # 计算生成波的反应谱
+            spec = Spectra.compute(signal.acc, signal.dt, self._code_periods, 0.05)
+            fit = WaveGenerator.fit_error(spec.sa, self._code_sa)
+
+            self._info_label.setText(
+                f"PGA = {signal.pga:.4f} g\n"
+                f"持时 = {signal.duration:.2f} s\n"
+                f"最大偏差 = {fit['max_error']:.1%}\n"
+                f"均方根偏差 = {fit['mean_error']:.1%}"
+            )
+
+            # 绘制反应谱对比
+            self._spec_plot.clear()
+            self._spec_plot.plot_code_spectrum(
+                self._code_periods, self._code_sa, label="目标谱")
+            colors = get_mpl_colors(self._dark)
+            self._spec_plot.plot_spectrum(
+                self._code_periods, spec.sa,
+                label="生成波", color=colors['primary'], linewidth=2.0)
+            self._spec_plot.ax.set_title("反应谱拟合对比", fontsize=11)
+            self._spec_plot.refresh()
+
+            # 绘制时程曲线
+            self._time_plot.clear()
+            ax = self._time_plot.ax
+            ax.plot(signal.time, signal.acc, color=colors['primary'], linewidth=0.6)
+            ax.set_xlabel("时间 (s)")
+            ax.set_ylabel("加速度 (g)")
+            ax.set_title("生成的人工地震波", fontsize=11)
+            self._time_plot.refresh()
+        except Exception as e:
+            self._info_label.setText(f"结果处理出错: {e}")
+
+    def _on_generation_error(self, err):
+        self._info_label.setText(f"生成出错: {err}")
+        self._run_btn.setEnabled(True)
+        if self._progress:
+            self._progress.close()
+            self._progress = None
 
     def get_generated(self):
         return self._generated

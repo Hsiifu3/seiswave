@@ -4,7 +4,9 @@
 显示导入的地震波信息：文件名、PGA、持时、有效持时等。
 """
 
-from PySide6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView
+from PySide6.QtWidgets import (
+    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
+)
 from PySide6.QtCore import Signal, Qt
 
 
