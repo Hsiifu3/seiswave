@@ -36,7 +36,7 @@ def main():
     import multiprocessing
     multiprocessing.set_start_method('spawn', force=True)
 
-    # Matplotlib 字体配置：中文宋体 + 英文 Times New Roman + 负号修复
+    # Matplotlib 字体配置：中文宋体(Songti SC) + 英文 Times New Roman + 负号修复
     import matplotlib
     matplotlib.rcParams['font.family'] = ['Times New Roman', 'Songti SC']
     matplotlib.rcParams['axes.unicode_minus'] = False

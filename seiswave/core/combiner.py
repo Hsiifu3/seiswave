@@ -377,6 +377,10 @@ class Combiner:
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
 
+        # 配置字体：中文宋体(Songti SC) + 英文 Times New Roman
+        plt.rcParams['font.family'] = ['Times New Roman', 'Songti SC']
+        plt.rcParams['axes.unicode_minus'] = False
+
         if output_path is None:
             os.makedirs(self.output_dir, exist_ok=True)
             output_path = os.path.join(self.output_dir, 'report.html')

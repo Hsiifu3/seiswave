@@ -5,6 +5,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+# 字体配置：中文宋体(Songti SC) + 英文 Times New Roman
+plt.rcParams['font.family'] = ['Times New Roman', 'Songti SC']
+plt.rcParams['axes.unicode_minus'] = False
+
 
 class Response:
     """结构响应分析类，用于计算单自由度系统响应"""

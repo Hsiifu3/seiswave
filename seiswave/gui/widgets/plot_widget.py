@@ -22,7 +22,7 @@ from PySide6.QtGui import QAction
 
 from seiswave.gui.styles import get_mpl_colors
 
-# 中文字体配置
+# 中文字体配置：中文宋体(Songti SC) + 英文 Times New Roman
 plt.rcParams['font.family'] = ['Times New Roman', 'Songti SC']
 plt.rcParams['axes.unicode_minus'] = False
 
