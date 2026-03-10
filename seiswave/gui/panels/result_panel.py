@@ -223,6 +223,10 @@ class ResultPanel(QWidget):
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
 
+        # 字体配置：中文宋体(Songti SC) + 英文 Times New Roman
+        plt.rcParams['font.family'] = ['Times New Roman', 'Songti SC']
+        plt.rcParams['axes.unicode_minus'] = False
+
         fig, ax = plt.subplots(figsize=(12, 7))
         colors = get_mpl_colors(self._dark)
         periods = self._code_periods
