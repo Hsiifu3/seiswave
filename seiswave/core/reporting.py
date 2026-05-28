@@ -27,14 +27,26 @@ def build_selection_summary(natural_results, generated_waves, code_periods=None,
 
     artificial = []
     for i, sig in enumerate(generated_waves or [], 1):
+        if sig is None:
+            artificial.append({
+                "index": i,
+                "type": "artificial",
+                "name": f"artificial_{i}",
+                "pga": 0.0,
+                "duration": 0.0,
+                "dt": 0.0,
+                "n": 0,
+            })
+            continue
+
         artificial.append({
             "index": i,
             "type": "artificial",
             "name": sig.name or f"artificial_{i}",
-            "pga": float(np.max(np.abs(sig.acc))) if sig is not None else 0.0,
-            "duration": float(sig.n * sig.dt) if sig is not None else 0.0,
-            "dt": float(sig.dt) if sig is not None else 0.0,
-            "n": int(sig.n) if sig is not None else 0,
+            "pga": float(np.max(np.abs(sig.acc))),
+            "duration": float(sig.n * sig.dt),
+            "dt": float(sig.dt),
+            "n": int(sig.n),
         })
 
     summary = {

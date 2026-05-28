@@ -98,7 +98,7 @@ class MainWindow(QMainWindow):
         self._dark = False
         self.setWindowTitle("SeisWave — 地震波选取与生成工具")
         self.setMinimumSize(1200, 800)
-        self.resize(1440, 920)
+        self.resize(1200, 800)
         self._selection_spectra = []
         self._generated_spectra = []
         self._current_step = 0
@@ -204,6 +204,8 @@ class MainWindow(QMainWindow):
         self._current_step = index
         self._stack.setCurrentIndex(index)
         self._step_indicator.set_step(index)
+        # 生成页本身已有双图对比，隐藏底部共享谱图避免界面被压缩。
+        self._shared_plot.setVisible(index != 2)
         self._update_nav()
         names = ["规范谱 / 导入", "选波", "人工波生成", "组合 / 导出"]
         if 0 <= index < len(names):
@@ -313,6 +315,7 @@ class MainWindow(QMainWindow):
         self._combine_panel.add_generated_wave(signal)
         self._summary_panel.set_generated_waves(
             self._result_panel._generated_waves)
+        self._signal_panel.add_signal(signal, select=True)
         from seiswave.core import Spectra
         periods, code_sa = self._sidebar.get_spectrum()
         if periods is not None:

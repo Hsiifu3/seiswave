@@ -71,28 +71,30 @@ def test_spectra_compute_uses_fortran():
 
 
 def test_spectrum_speed():
-    """Fortran 反应谱应比 Python 快 50x+"""
+    """Numba/Python 反应谱应与 Fortran 处于同一数量级"""
     np.random.seed(42)
     acc = np.random.randn(4096) * 0.2
     dt = 0.02
     periods = np.logspace(np.log10(0.1), np.log10(6.0), 100)
 
-    # Fortran
+    # Fortran / mixed
     t0 = time.time()
     sp_f = Spectra.compute(acc, dt, periods, 0.05, method='mixed')
     t_fortran = time.time() - t0
 
-    # Python (only 20 periods for fairness)
+    # Numba Python 串行 vs 并行（应完全等价）
     t0 = time.time()
-    sp_p = Spectra.compute(acc, dt, periods[:20], 0.05, method='newmark')
-    t_python_20 = time.time() - t0
+    sp_s = Spectra.compute(acc, dt, periods, 0.05, method='newmark', parallel=False)
+    t_serial = time.time() - t0
 
-    # Extrapolate Python time for 100 periods
-    t_python_est = t_python_20 * (100 / 20)
-    speedup = t_python_est / max(t_fortran, 1e-6)
+    t0 = time.time()
+    sp_p = Spectra.compute(acc, dt, periods, 0.05, method='newmark', parallel=True)
+    t_parallel = time.time() - t0
 
-    print(f"✅ Speed: Fortran={t_fortran:.4f}s, Python(est)={t_python_est:.2f}s, speedup={speedup:.0f}x")
-    assert speedup > 50, f"speedup only {speedup:.0f}x, expected >50x"
+    print(f"✅ Speed: Fortran={t_fortran:.4f}s, Serial={t_serial:.4f}s, Parallel={t_parallel:.4f}s")
+    assert t_fortran < 0.5, f"Fortran too slow: {t_fortran:.2f}s"
+    assert t_parallel < 0.5, f"Python too slow: {t_parallel:.2f}s"
+    assert np.allclose(sp_s.sa, sp_p.sa, rtol=1e-10), "并行与串行结果不一致"
 
 
 def test_acc2vd():

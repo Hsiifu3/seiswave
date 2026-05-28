@@ -9,10 +9,17 @@ from .core import (
     FileIO, EQRecord, CodeSpectrum,
     WaveSelector, SelectionConfig, SelectionResult,
     PeerDatabase, PeerRecord, Combiner, WaveGroup,
-    FFT, Response,
+    FFT,
 )
 
 __version__ = "2.0.0"
+
+def __getattr__(name):
+    if name == 'Response':
+        from .core import Response
+        return Response
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     'EQSignal',

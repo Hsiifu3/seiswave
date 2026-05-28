@@ -203,6 +203,8 @@ def acc2vd(acc: np.ndarray, dt: float, v0: float = 0.0,
     (v, d) : 速度、位移时程
     """
     acc = np.ascontiguousarray(acc, dtype=np.float64)
+    if acc.size == 0:
+        raise ValueError('Input acceleration array is empty')
 
     if HAS_FORTRAN:
         v, d = _eqs.basic.acc2vd(acc, dt, v0, d0)

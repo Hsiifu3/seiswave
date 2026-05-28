@@ -1,0 +1,18 @@
+[run]
+source = seiswave
+omit =
+    */gui_backup_*/**
+    */gui.bak/*
+    */tests/*
+    */benchmarks/*
+    */__pycache__/*
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise AssertionError
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    class .*\bProtocol\):
+    @(abc\.)?abstractmethod

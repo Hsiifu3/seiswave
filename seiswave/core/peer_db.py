@@ -7,10 +7,13 @@ PEER NGA 数据库管理模块
 import os
 import re
 import json
-import warnings
+import logging
 import numpy as np
 from dataclasses import dataclass, field, asdict
 from typing import Optional, Callable
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -70,7 +73,7 @@ class PeerDatabase:
                 rec = self._parse_at2_header(fpath, fname)
                 self.records.append(rec)
             except Exception as e:
-                warnings.warn(f"跳过 {fname}: {e}")
+                logger.warning("跳过 %s: %s", fname, e)
 
             if progress_cb and idx % 50 == 0:
                 progress_cb(idx, total)

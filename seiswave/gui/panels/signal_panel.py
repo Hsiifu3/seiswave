@@ -5,7 +5,7 @@
 - 有效持时 D5-95 计算和显示
 - 处理前后对比可视化
 - 关键参数对比（PGA、Arias 强度、有效持时）
-- 信号处理：基线校正、滤波、截断
+- 人工波与天然波统一后处理：基线校正、滤波、截断
 """
 
 from PySide6.QtWidgets import (
@@ -53,12 +53,12 @@ class SignalPanel(QWidget):
         info_group = QGroupBox("当前处理记录")
         info_layout = QVBoxLayout(info_group)
         self._picker = QComboBox()
-        self._picker.addItem("请选择导入记录...")
-        self._pick_btn = QPushButton("载入记录")
+        self._picker.addItem("请选择人工波/天然波记录...")
+        self._pick_btn = QPushButton("载入当前记录")
         self._pick_btn.clicked.connect(self._apply_selection)
         info_layout.addWidget(self._picker)
         info_layout.addWidget(self._pick_btn)
-        self._info_label = QLabel("未选择信号，处理操作已禁用")
+        self._info_label = QLabel("未选择人工波/天然波记录，统一后处理操作已禁用")
         self._info_label.setWordWrap(True)
         info_layout.addWidget(self._info_label)
         param_layout.addWidget(info_group)
@@ -87,14 +87,14 @@ class SignalPanel(QWidget):
         param_layout.addWidget(compare_group)
 
         # 基线校正
-        baseline_group = QGroupBox("基线校正")
+        baseline_group = QGroupBox("统一后处理：基线校正")
         baseline_form = QFormLayout(baseline_group)
         self._baseline_combo = QComboBox()
         self._baseline_combo.addItems(["多项式去趋势", "双线性去趋势"])
         self._poly_order_spin = QSpinBox()
         self._poly_order_spin.setRange(1, 6)
         self._poly_order_spin.setValue(2)
-        self._baseline_btn = QPushButton("应用基线校正")
+        self._baseline_btn = QPushButton("应用统一后处理：基线校正")
         self._baseline_btn.clicked.connect(self._apply_baseline)
         baseline_form.addRow("方法:", self._baseline_combo)
         baseline_form.addRow("多项式阶数:", self._poly_order_spin)
@@ -102,7 +102,7 @@ class SignalPanel(QWidget):
         param_layout.addWidget(baseline_group)
 
         # Butterworth 滤波
-        filter_group = QGroupBox("Butterworth 滤波")
+        filter_group = QGroupBox("统一后处理：Butterworth 滤波")
         filter_form = QFormLayout(filter_group)
         self._filter_type_combo = QComboBox()
         self._filter_type_combo.addItems(["带通", "低通", "高通"])
@@ -115,7 +115,7 @@ class SignalPanel(QWidget):
         self._f2_spin = QDoubleSpinBox()
         self._f2_spin.setRange(0.1, 100.0)
         self._f2_spin.setValue(25.0)
-        self._filter_btn = QPushButton("应用滤波")
+        self._filter_btn = QPushButton("应用统一后处理：滤波")
         self._filter_btn.clicked.connect(self._apply_filter)
         filter_form.addRow("滤波类型:", self._filter_type_combo)
         filter_form.addRow("滤波器阶数:", self._filter_order_spin)
@@ -125,7 +125,7 @@ class SignalPanel(QWidget):
         param_layout.addWidget(filter_group)
 
         # 截断
-        trim_group = QGroupBox("信号截断")
+        trim_group = QGroupBox("统一后处理：信号截断")
         trim_form = QFormLayout(trim_group)
         self._trim_start = QDoubleSpinBox()
         self._trim_start.setRange(0.0, 9999.0)
@@ -135,9 +135,9 @@ class SignalPanel(QWidget):
         self._trim_end.setRange(0.0, 9999.0)
         self._trim_end.setDecimals(2)
         self._trim_end.setSuffix(" s")
-        self._trim_btn = QPushButton("应用截断")
+        self._trim_btn = QPushButton("应用统一后处理：裁剪")
         self._trim_btn.clicked.connect(self._apply_trim)
-        self._auto_trim_btn = QPushButton("自动截断 (D5-95)")
+        self._auto_trim_btn = QPushButton("自动裁剪 (D5-95)")
         self._auto_trim_btn.clicked.connect(self._apply_auto_trim)
         trim_form.addRow("起始时间:", self._trim_start)
         trim_form.addRow("结束时间:", self._trim_end)
@@ -163,17 +163,29 @@ class SignalPanel(QWidget):
 
     # ──────────────────── 信号池与选择 ────────────────────
 
-    def set_signal_pool(self, signals):
-        self._signal_pool = signals or []
+    def _refresh_picker(self, placeholder="请选择人工波/天然波记录..."):
         self._picker.clear()
-        self._picker.addItem("请选择导入记录...")
+        self._picker.addItem(placeholder)
         for s in self._signal_pool:
             self._picker.addItem(s.name or "未命名记录")
+
+    def set_signal_pool(self, signals):
+        self._signal_pool = list(signals or [])
+        self._refresh_picker()
         if not self._signal_pool:
-            self._info_label.setText("未导入记录，处理操作已禁用")
+            self._info_label.setText("暂无人工波/天然波记录，统一后处理操作已禁用")
             self._signal = None
             self._processed = None
             self._update_action_state()
+
+    def add_signal(self, signal, select=False):
+        if signal is None:
+            return
+        self._signal_pool.append(signal)
+        self._refresh_picker()
+        if select:
+            self._picker.setCurrentIndex(len(self._signal_pool))
+            self.set_signal(signal)
 
     def _apply_selection(self):
         idx = self._picker.currentIndex() - 1
@@ -269,13 +281,14 @@ class SignalPanel(QWidget):
         if self._processed is None:
             QMessageBox.warning(self, "警告", "未选择记录，无法处理")
             return
-        if self._baseline_combo.currentIndex() == 0:
-            self._processed.acc = Filter.detrend(
-                self._processed.acc, self._processed.dt,
-                order=self._poly_order_spin.value(),
-            )
-        else:
-            self._processed.acc = Filter.bilinear_detrend(self._processed.acc)
+        from seiswave.core.filter import correct_baseline
+        method = 'poly' if self._baseline_combo.currentIndex() == 0 else 'bilinear'
+        self._processed = correct_baseline(
+            self._processed,
+            method=method,
+            order=self._poly_order_spin.value(),
+            copy=False,
+        )
         self._after_process()
 
     def _apply_filter(self):

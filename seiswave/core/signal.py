@@ -42,6 +42,14 @@ class EQSignal:
         self.vel = np.zeros(self.n)
         self.disp = np.zeros(self.n)
 
+    def copy(self) -> 'EQSignal':
+        """返回信号副本，保留已计算的速度/位移。"""
+        dup = EQSignal(self.acc.copy(), self.dt, name=self.name,
+                       v0=self.v0, d0=self.d0)
+        dup.vel = self.vel.copy()
+        dup.disp = self.disp.copy()
+        return dup
+
     # ──────────────────── I/O 便捷方法 ────────────────────
 
     @classmethod
@@ -110,14 +118,11 @@ class EQSignal:
         order : int
             多项式阶数（仅 method="poly" 时有效）
         """
-        from .filter import Filter
-        if method == "poly":
-            self.acc = Filter.detrend(self.acc, self.dt, order=order)
-        elif method == "bilinear":
-            self.acc = Filter.bilinear_detrend(self.acc)
-        else:
-            raise ValueError(f"未知的基线校正方法: {method}")
-        self.a2vd()
+        from .filter import correct_baseline
+        corrected = correct_baseline(self, method=method, order=order, copy=False)
+        self.acc = corrected.acc
+        self.vel = corrected.vel
+        self.disp = corrected.disp
 
     def filter(self, ftype: str = "bandpass", order: int = 4,
                f1: float = 0.1, f2: float = 25.0) -> None:
