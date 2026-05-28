@@ -169,7 +169,7 @@ def _generator_subprocess(conn, target, periods, n, dt, zeta, pga, tol, max_iter
         conn.send(('done', result.acc, result.dt, result.name))
     except Exception as e:
         logger.exception("[%s]%s subprocess failed: %s", job_id, trial_text, e)
-        conn.send(('error', ''.join(traceback.format_exception_only(type(e), e)).strip()))
+        conn.send(('error', str(e)))
     finally:
         conn.close()
 
@@ -236,7 +236,7 @@ class GeneratorWorker(BaseWorker):
         )
         try:
             self._process.start()
-            logger.info("[%s] GeneratorWorker child pid=%s started", self._job_id, self._process.pid)
+            logger.info("[%s] GeneratorWorker child pid=%s started", self._job_id, getattr(self._process, 'pid', '?'))
         except Exception:
             logger.exception("[%s] GeneratorWorker child start failed", self._job_id)
             parent_conn.close()
@@ -247,7 +247,7 @@ class GeneratorWorker(BaseWorker):
 
         while self._process.is_alive() or parent_conn.poll():
             if self.is_cancelled:
-                logger.warning("[%s] GeneratorWorker cancelled, terminating child pid=%s", self._job_id, self._process.pid)
+                logger.warning("[%s] GeneratorWorker cancelled, terminating child pid=%s", self._job_id, getattr(self._process, 'pid', '?'))
                 self._process.terminate()
                 raise InterruptedError("用户取消")
 
@@ -330,7 +330,7 @@ class MultiTrialGeneratorWorker(BaseWorker):
         )
         try:
             self._process.start()
-            logger.info("[%s] MultiTrial child pid=%s started for trial=%s", self._job_id, self._process.pid, trial_idx + 1)
+            logger.info("[%s] MultiTrial child pid=%s started for trial=%s", self._job_id, getattr(self._process, 'pid', '?'), trial_idx + 1)
         except Exception:
             logger.exception("[%s] MultiTrial child start failed for trial=%s", self._job_id, trial_idx + 1)
             parent_conn.close()
@@ -341,7 +341,7 @@ class MultiTrialGeneratorWorker(BaseWorker):
 
         while self._process.is_alive() or parent_conn.poll():
             if self.is_cancelled:
-                logger.warning("[%s] MultiTrial cancelled at trial=%s pid=%s", self._job_id, trial_idx + 1, self._process.pid)
+                logger.warning("[%s] MultiTrial cancelled at trial=%s pid=%s", self._job_id, trial_idx + 1, getattr(self._process, 'pid', '?'))
                 self._process.terminate()
                 raise InterruptedError("用户取消")
 
@@ -409,7 +409,11 @@ class MultiTrialGeneratorWorker(BaseWorker):
             progress_callback=progress_cb,
             n_trials=1,
         )
-        logger.info("[%s] MultiTrial in-process trial=%s done name=%s len=%s", self._job_id, trial_idx + 1, result.name, len(result.acc))
+        acc = getattr(result, 'acc', None)
+        logger.info("[%s] MultiTrial in-process trial=%s done name=%s len=%s",
+                    self._job_id, trial_idx + 1,
+                    getattr(result, 'name', '<unknown>'),
+                    len(acc) if acc is not None else 0)
         return result
 
     def execute(self):
@@ -535,7 +539,11 @@ class SpecialGroundMotionWorker(BaseWorker):
             fm=self._fm,
             progress_callback=progress_cb,
         )
-        logger.info("[%s] SpecialGroundMotionWorker done name=%s len=%s", self._job_id, result.name, len(result.acc))
+        acc = getattr(result, 'acc', None)
+        logger.info("[%s] SpecialGroundMotionWorker done name=%s len=%s",
+                    self._job_id,
+                    getattr(result, 'name', '<unknown>'),
+                    len(acc) if acc is not None else 0)
         return result
 
 
