@@ -11,6 +11,94 @@
 """
 
 import numpy as np
+from concurrent.futures import ThreadPoolExecutor
+
+try:
+    from numba import jit
+    HAS_NUMBA = True
+except Exception:
+    HAS_NUMBA = False
+
+    def jit(*args, **kwargs):
+        def _wrap(func):
+            return func
+        if args and callable(args[0]):
+            return args[0]
+        return _wrap
+
+
+def _newmark_beta_task(args):
+    return _newmark_beta_kernel(*args)
+
+
+@jit(nopython=True, cache=True, nogil=True)
+def _newmark_beta_kernel(acc, dt, period, zeta, out_ra=None, out_rv=None, out_rd=None):
+    """Numba kernel for EQSignal-compatible Newmark-beta integration."""
+    mpr = 20
+    omega = 2.0 * np.pi / period
+    k = omega ** 2
+    c = 2.0 * zeta * omega
+    n = len(acc)
+
+    if dt * mpr > period:
+        r = int(np.ceil(mpr * dt / period))
+        sub_dt = dt / r
+    else:
+        r = 1
+        sub_dt = dt
+
+    beta = 0.25
+    gamma = 0.5
+
+    b1 = 1.0 / (beta * sub_dt ** 2)
+    b2 = 1.0 / (beta * sub_dt)
+    b3 = 1.0 / (2.0 * beta) - 1.0
+    b4 = gamma / (beta * sub_dt)
+    b5 = gamma / beta - 1.0
+    b6 = 0.5 * sub_dt * (gamma / beta - 2.0)
+
+    keff = k + b1 + b4 * c
+    kinv = 1.0 / keff
+
+    rl0 = 0.0
+    rl1 = 0.0
+    rl2 = 0.0
+    al = 0.0
+
+    if out_rd is None:
+        rd = np.zeros(n)
+    else:
+        rd = out_rd
+    if out_rv is None:
+        rv = np.zeros(n)
+    else:
+        rv = out_rv
+    if out_ra is None:
+        ra = np.zeros(n)
+    else:
+        ra = out_ra
+
+    for i in range(n):
+        ac = acc[i]
+        da = (ac - al) / r
+
+        for j in range(1, r + 1):
+            ac_sub = al + da * j
+            feff = ac_sub + (b1 * rl0 + b2 * rl1 + b3 * rl2) \
+                + c * (b4 * rl0 + b5 * rl1 + b6 * rl2)
+            rc0 = feff * kinv
+            rc1 = b4 * (rc0 - rl0) - b5 * rl1 - b6 * rl2
+            rc2 = ac_sub - k * rc0 - c * rc1
+            rl0 = rc0
+            rl1 = rc1
+            rl2 = rc2
+
+        rd[i] = rl0
+        rv[i] = rl1
+        ra[i] = rl2
+        al = ac
+
+    return ra, rv, rd
 
 
 class Spectra:
@@ -75,7 +163,8 @@ class Spectra:
 
     @staticmethod
     def compute(acc: np.ndarray, dt: float, periods: np.ndarray,
-                zeta: float = 0.05, method: str = "mixed") -> 'Spectra':
+                zeta: float = 0.05, method: str = "mixed",
+                parallel: bool = False, max_workers: int = None) -> 'Spectra':
         """计算反应谱
 
         Parameters
@@ -92,6 +181,10 @@ class Spectra:
             "newmark" = Newmark-β 平均加速度法
             "freq" = 频域法
             "mixed" = 短周期频域 + 长周期 Newmark（默认，优先 Fortran 加速）
+        parallel : bool
+            启用 Numba + 线程池并行计算长周期 Newmark 响应。
+        max_workers : int
+            并行线程数上限，None 时使用 ThreadPoolExecutor 默认值。
 
         Returns
         -------
@@ -110,23 +203,27 @@ class Spectra:
                     acc, dt, zeta, periods)
                 return sp
 
-        # Python 回退路径
+        # Python / Numba 路径
         sp.sa = np.zeros(n_periods)
         sp.sv = np.zeros(n_periods)
         sp.sd = np.zeros(n_periods)
         sp.se = np.zeros(n_periods)
 
+        threshold = 20.0 * dt
+        pending = []
+
         for i, T in enumerate(periods):
             if method == "newmark":
-                ra, rv, rd = Spectra._newmark_beta(acc, dt, T, zeta)
-            elif method == "freq":
+                pending.append((i, float(T)))
+                continue
+            if method == "freq":
                 ra, rv, rd = Spectra._freq_domain(acc, dt, T, zeta)
             elif method == "mixed":
-                threshold = 20.0 * dt
                 if T < threshold:
                     ra, rv, rd = Spectra._freq_domain(acc, dt, T, zeta)
                 else:
-                    ra, rv, rd = Spectra._newmark_beta(acc, dt, T, zeta)
+                    pending.append((i, float(T)))
+                    continue
             else:
                 raise ValueError(f"未知的计算方法: {method}")
 
@@ -134,15 +231,41 @@ class Spectra:
             sp.sa[i] = np.max(np.abs(abs_acc))
             sp.sv[i] = np.max(np.abs(rv))
             sp.sd[i] = np.max(np.abs(rd))
-
             omega = 2.0 * np.pi / T
             sp.se[i] = np.max(0.5 * omega**2 * rd**2)
+
+        if pending:
+            if parallel and HAS_NUMBA and len(pending) > 1:
+                tasks = [(acc, dt, T, zeta) for _, T in pending]
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    results = list(executor.map(_newmark_beta_task, tasks))
+                for (idx, T), (ra, rv, rd) in zip(pending, results):
+                    abs_acc = -ra + acc[:len(ra)]
+                    sp.sa[idx] = np.max(np.abs(abs_acc))
+                    sp.sv[idx] = np.max(np.abs(rv))
+                    sp.sd[idx] = np.max(np.abs(rd))
+                    omega = 2.0 * np.pi / T
+                    sp.se[idx] = np.max(0.5 * omega**2 * rd**2)
+            else:
+                n = len(acc)
+                out_ra = np.zeros(n)
+                out_rv = np.zeros(n)
+                out_rd = np.zeros(n)
+                for idx, T in pending:
+                    ra, rv, rd = Spectra._newmark_beta(
+                        acc, dt, T, zeta, out_ra, out_rv, out_rd)
+                    abs_acc = -ra + acc[:len(ra)]
+                    sp.sa[idx] = np.max(np.abs(abs_acc))
+                    sp.sv[idx] = np.max(np.abs(rv))
+                    sp.sd[idx] = np.max(np.abs(rd))
+                    omega = 2.0 * np.pi / T
+                    sp.se[idx] = np.max(0.5 * omega**2 * rd**2)
 
         return sp
 
     @staticmethod
     def _newmark_beta(acc: np.ndarray, dt: float, period: float,
-                      zeta: float) -> tuple:
+                      zeta: float, out_ra=None, out_rv=None, out_rd=None) -> tuple:
         """Newmark-β 平均加速度法计算 SDOF 响应
 
         使用 γ=0.5, β=0.25（平均加速度法，无条件稳定）。
@@ -158,12 +281,20 @@ class Spectra:
             SDOF 自振周期
         zeta : float
             阻尼比
+        out_ra, out_rv, out_rd : np.ndarray, optional
+            预分配的输出数组，用于避免重复内存分配
 
         Returns
         -------
         tuple[np.ndarray, np.ndarray, np.ndarray]
             (相对加速度, 相对速度, 相对位移)
         """
+        if HAS_NUMBA:
+            return _newmark_beta_kernel(
+                np.asarray(acc, dtype=np.float64), float(dt), float(period), float(zeta),
+                out_ra, out_rv, out_rd
+            )
+
         MPR = 20  # 与 EQSignal 一致
 
         omega = 2.0 * np.pi / period
@@ -198,9 +329,18 @@ class Spectra:
 
         # 状态变量：[位移, 速度, 加速度]
         rl = np.zeros(3)  # 上一步
-        rd = np.zeros(n)
-        rv = np.zeros(n)
-        ra = np.zeros(n)
+        if out_rd is None:
+            rd = np.zeros(n)
+        else:
+            rd = out_rd
+        if out_rv is None:
+            rv = np.zeros(n)
+        else:
+            rv = out_rv
+        if out_ra is None:
+            ra = np.zeros(n)
+        else:
+            ra = out_ra
 
         al = 0.0  # 上一步加速度（用于子步插值）
 

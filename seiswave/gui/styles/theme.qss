@@ -1,0 +1,173 @@
+/* SeisWave Generator Panel Theme QSS
+ * 统一颜色与字体层级，适配浅色/深色模式。
+ * 不定义背景色，由应用级主题（styles.py）控制；本文件只定义
+ * 边框、圆角、字体、控件高度等跨模式通用属性。
+ */
+
+/* ── 颜色变量（注释说明，实际值 inline）── */
+/* primary: #2196F3 | secondary: #607D8B | accent: #F18F01 */
+/* warning: #FF5722 | success: #4CAF50 */
+
+/* ── 字体层级 ── */
+.heading {
+    font-size: 14px;
+    font-weight: bold;
+}
+.label {
+    font-size: 12px;
+}
+.value {
+    font-size: 12px;
+    font-family: "SF Mono", "Menlo", "Consolas", monospace;
+}
+
+/* ── QGroupBox 卡片化 ── */
+QGroupBox {
+    font-weight: bold;
+    font-size: 13px;
+    border: 1px solid #607D8B;
+    border-left: 3px solid #2196F3;
+    border-radius: 4px;
+    margin-top: 10px;
+    padding-top: 14px;
+    padding-left: 8px;
+    padding-right: 8px;
+    padding-bottom: 8px;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 8px;
+    padding: 0 4px;
+    color: #2196F3;
+}
+QGroupBox[accent="true"] {
+    border-left: 3px solid #F18F01;
+}
+QGroupBox[accent="true"]::title {
+    color: #F18F01;
+}
+QGroupBox[warning="true"] {
+    border-left: 3px solid #FF5722;
+}
+QGroupBox[warning="true"]::title {
+    color: #FF5722;
+}
+QGroupBox[success="true"] {
+    border-left: 3px solid #4CAF50;
+}
+QGroupBox[success="true"]::title {
+    color: #4CAF50;
+}
+
+/* ── QPushButton ── */
+QPushButton {
+    background-color: #2196F3;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 12px;
+    min-height: 28px;
+    font-size: 12px;
+    font-weight: bold;
+}
+QPushButton:hover {
+    background-color: #1976D2;
+}
+QPushButton:pressed {
+    background-color: #0D47A1;
+}
+QPushButton:disabled {
+    background-color: #BDBDBD;
+    color: #757575;
+}
+QPushButton[secondary="true"] {
+    background-color: transparent;
+    color: #607D8B;
+    border: 1px solid #607D8B;
+}
+QPushButton[secondary="true"]:hover {
+    background-color: rgba(96, 125, 139, 0.1);
+}
+
+/* ── 输入控件 ── */
+QComboBox, QSpinBox, QDoubleSpinBox {
+    min-height: 28px;
+    max-height: 28px;
+    border: 1px solid #CCCCCC;
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 12px;
+}
+QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover {
+    border-color: #2196F3;
+}
+QComboBox::drop-down {
+    width: 20px;
+    border-left: 1px solid #CCCCCC;
+}
+QComboBox QAbstractItemView {
+    border: 1px solid #CCCCCC;
+    border-radius: 4px;
+    selection-background-color: #E3F2FD;
+}
+
+/* ── QLabel ── */
+QLabel {
+    font-size: 12px;
+}
+QLabel.heading {
+    font-size: 14px;
+    font-weight: bold;
+}
+QLabel.value {
+    font-size: 12px;
+    font-family: "SF Mono", "Menlo", "Consolas", monospace;
+}
+QLabel[accent="true"] {
+    color: #F18F01;
+}
+QLabel[warning="true"] {
+    color: #FF5722;
+}
+QLabel[success="true"] {
+    color: #4CAF50;
+}
+
+/* ── QProgressBar ── */
+QProgressBar {
+    border: 1px solid #CCCCCC;
+    border-radius: 4px;
+    text-align: center;
+    font-size: 11px;
+    min-height: 16px;
+    max-height: 16px;
+}
+QProgressBar::chunk {
+    background-color: #2196F3;
+    border-radius: 3px;
+}
+QProgressBar[accent="true"]::chunk {
+    background-color: #F18F01;
+}
+QProgressBar[success="true"]::chunk {
+    background-color: #4CAF50;
+}
+QProgressBar[warning="true"]::chunk {
+    background-color: #FF5722;
+}
+
+/* ── QScrollArea ── */
+QScrollArea {
+    border: none;
+    background-color: transparent;
+}
+QScrollArea > QWidget > QWidget {
+    background-color: transparent;
+}
+
+/* ── QSplitter ── */
+QSplitter::handle {
+    background-color: #E0E0E0;
+    width: 2px;
+    height: 2px;
+}

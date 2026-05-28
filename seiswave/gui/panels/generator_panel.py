@@ -1,26 +1,61 @@
-"""
-人工波生成面板
+"""人工波生成面板（三栏响应式布局版）
 
-目标谱选择、参数设置、多 trial 自动取最优、迭代进度实时显示、收敛谱对比。
+支持四种地震动类型：
+- 一般人工波：基于目标谱的迭代匹配
+- 远场 FF：基于 GMPE 目标谱 + 远场包络
+- 近场无脉冲 NF：基于 GMPE 目标谱 + 近场包络
+- 近场脉冲 NFP：脉冲分量 + 残余分量叠加
+
+三栏布局：左栏参数（320px） | 中间绘图（弹性≥500px） | 右栏信息（280px）
+底部状态栏（32px）
 """
 
+import os
+import logging
 import numpy as np
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
-    QDoubleSpinBox, QSpinBox, QFormLayout, QPushButton, QComboBox,
-    QMessageBox, QSplitter, QSizePolicy, QProgressBar,
+    QWidget, QHBoxLayout, QVBoxLayout, QSizePolicy, QMessageBox,
 )
 from PySide6.QtCore import Signal, Qt
 
-from seiswave.core import WaveGenerator, Spectra
-from seiswave.gui.widgets.spectrum_plot import SpectrumPlot
-from seiswave.gui.widgets.plot_widget import PlotWidget
-from seiswave.gui.workers import MultiTrialGeneratorWorker
-from seiswave.gui.styles import get_mpl_colors
+from seiswave.gui.panels.left_panel import LeftPanel
+from seiswave.gui.panels.center_panel import CenterPanel
+from seiswave.gui.panels.right_panel import RightPanel
+from seiswave.gui.panels.bottom_bar import BottomBar
+from seiswave.gui.panels.result_presenter import ResultPresenter
+from seiswave.gui.panels.generator_controller import GeneratorController
+
+# 向后兼容：常量仍可从本模块导入
+from seiswave.gui.panels.param_form import GM_TYPE_LABELS, GM_TYPE_CODES
+
+logger = logging.getLogger(__name__)
+
+
+def _load_theme_qss(dark: bool = False) -> str:
+    """加载并可选替换 theme.qss 颜色"""
+    path = os.path.join(
+        os.path.dirname(__file__), "..", "styles", "theme.qss"
+    )
+    if not os.path.exists(path):
+        return ""
+    with open(path, "r", encoding="utf-8") as f:
+        qss = f.read()
+    if dark:
+        # 浅色→深色关键色替换
+        qss = qss.replace("#2196F3", "#64B5F6")
+        qss = qss.replace("#1976D2", "#42A5F5")
+        qss = qss.replace("#0D47A1", "#1976D2")
+        qss = qss.replace("#607D8B", "#78909C")
+        qss = qss.replace("#CCCCCC", "#3D3D3D")
+        qss = qss.replace("#E0E0E0", "#3D3D3D")
+        qss = qss.replace("#E3F2FD", "#1E3A5F")
+        qss = qss.replace("#888", "#AAAAAA")
+        qss = qss.replace("#666", "#AAAAAA")
+    return qss
 
 
 class GeneratorPanel(QWidget):
-    """人工波生成面板（多 trial + 实时进度 + 收敛谱对比）"""
+    """人工波生成面板（三栏响应式 + 卡片化参数）"""
 
     wave_generated = Signal(object)  # 生成完成信号 (EQSignal)
 
@@ -30,262 +65,228 @@ class GeneratorPanel(QWidget):
         self._code_periods = None
         self._code_sa = None
         self._generated = None
-        self._worker = None
         self._setup_ui()
+        self._connect_signals()
+        self._apply_panel_theme()
 
     def _setup_ui(self):
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(4, 4, 4, 4)
+        root.setSpacing(4)
 
-        # 左侧参数面板
-        param_widget = QWidget()
-        param_widget.setMinimumWidth(290)
-        param_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
-        param_layout = QVBoxLayout(param_widget)
-        param_layout.setContentsMargins(0, 0, 0, 0)
+        # ── 三栏主体 ──
+        body = QHBoxLayout()
+        body.setSpacing(4)
 
-        # 目标谱
-        target_group = QGroupBox("目标谱")
-        target_form = QFormLayout(target_group)
-        target_form.setLabelAlignment(Qt.AlignRight)
-        target_form.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
-        self._target_combo = QComboBox()
-        self._target_combo.addItems(["当前规范谱"])
-        self._target_combo.setEnabled(False)
-        target_form.addRow("目标谱来源:", self._target_combo)
-        param_layout.addWidget(target_group)
-        # 生成参数
-        gen_group = QGroupBox("生成参数")
-        gen_form = QFormLayout(gen_group)
-        gen_form.setLabelAlignment(Qt.AlignRight)
-        gen_form.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        # 左栏
+        self._left_panel = LeftPanel()
+        body.addWidget(self._left_panel)
 
-        self._npts_spin = QSpinBox()
-        self._npts_spin.setRange(1024, 32768)
-        self._npts_spin.setSingleStep(1024)
-        self._npts_spin.setValue(4096)
-        self._npts_spin.setFixedWidth(120)
-        gen_form.addRow("数据点数:", self._npts_spin)
+        # 中间
+        self._center_panel = CenterPanel(dark=self._dark)
+        body.addWidget(self._center_panel, 1)
 
-        self._dt_spin = QDoubleSpinBox()
-        self._dt_spin.setRange(0.001, 0.1)
-        self._dt_spin.setSingleStep(0.005)
-        self._dt_spin.setValue(0.02)
-        self._dt_spin.setDecimals(3)
-        self._dt_spin.setFixedWidth(120)
-        gen_form.addRow("时间步长 Δt (s):", self._dt_spin)
+        # 右栏
+        self._right_panel = RightPanel()
+        body.addWidget(self._right_panel)
 
-        self._pga_spin = QDoubleSpinBox()
-        self._pga_spin.setRange(0.01, 5.0)
-        self._pga_spin.setSingleStep(0.05)
-        self._pga_spin.setValue(0.20)
-        self._pga_spin.setDecimals(3)
-        self._pga_spin.setFixedWidth(120)
-        gen_form.addRow("目标 PGA (g):", self._pga_spin)
+        root.addLayout(body, 1)
 
-        self._zeta_spin = QDoubleSpinBox()
-        self._zeta_spin.setRange(0.01, 0.30)
-        self._zeta_spin.setSingleStep(0.01)
-        self._zeta_spin.setValue(0.05)
-        self._zeta_spin.setDecimals(2)
-        self._zeta_spin.setFixedWidth(120)
-        gen_form.addRow("阻尼比 ζ:", self._zeta_spin)
+        # ── 底部状态栏 ──
+        self._bottom_bar = BottomBar()
+        root.addWidget(self._bottom_bar)
 
-        param_layout.addWidget(gen_group)
+        # ── 内部向后兼容组件 ──
+        # ParamFormWidget 和 ProgressWidget 已嵌入左栏
+        self._param_form = self._left_panel.param_form
+        self._progress = self._left_panel.progress
 
-        # 迭代控制
-        iter_group = QGroupBox("迭代控制")
-        iter_form = QFormLayout(iter_group)
-        iter_form.setLabelAlignment(Qt.AlignRight)
-        iter_form.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        # 绘图引用
+        spec_plot = self._center_panel.spec_plot
+        time_plot = self._center_panel.time_plot
 
-        self._tol_spin = QDoubleSpinBox()
-        self._tol_spin.setRange(0.01, 0.20)
-        self._tol_spin.setSingleStep(0.01)
-        self._tol_spin.setValue(0.05)
-        self._tol_spin.setDecimals(2)
-        self._tol_spin.setFixedWidth(120)
-        iter_form.addRow("收敛容限:", self._tol_spin)
-
-        self._maxiter_spin = QSpinBox()
-        self._maxiter_spin.setRange(10, 200)
-        self._maxiter_spin.setSingleStep(10)
-        self._maxiter_spin.setValue(50)
-        self._maxiter_spin.setFixedWidth(120)
-        iter_form.addRow("最大迭代次数:", self._maxiter_spin)
-
-        self._trials_spin = QSpinBox()
-        self._trials_spin.setRange(1, 10)
-        self._trials_spin.setSingleStep(1)
-        self._trials_spin.setValue(3)
-        self._trials_spin.setFixedWidth(120)
-        iter_form.addRow("Trial 数量:", self._trials_spin)
-
-        param_layout.addWidget(iter_group)
-        # 执行按钮
-        self._run_btn = QPushButton("生成人工波")
-        self._run_btn.clicked.connect(self._run_generation)
-        param_layout.addWidget(self._run_btn)
-
-        # 实时进度区
-        progress_group = QGroupBox("迭代进度")
-        progress_layout = QVBoxLayout(progress_group)
-        self._progress_bar = QProgressBar()
-        self._progress_bar.setRange(0, 100)
-        self._progress_bar.setValue(0)
-        progress_layout.addWidget(self._progress_bar)
-        self._progress_label = QLabel("等待生成...")
-        self._progress_label.setWordWrap(True)
-        progress_layout.addWidget(self._progress_label)
-        param_layout.addWidget(progress_group)
-
-        # 结果信息
-        self._info_label = QLabel("")
-        self._info_label.setWordWrap(True)
-        param_layout.addWidget(self._info_label)
-
-        param_layout.addStretch()
-        layout.addWidget(param_widget)
-
-        # 右侧绘图区（上下分割）
-        right_splitter = QSplitter(Qt.Vertical)
-
-        self._spec_plot = SpectrumPlot(dark=self._dark, log_x=False,
-                                       show_toolbar=False)
-        right_splitter.addWidget(self._spec_plot)
-
-        self._time_plot = PlotWidget(dark=self._dark, show_toolbar=False)
-        right_splitter.addWidget(self._time_plot)
-
-        right_splitter.setSizes([400, 300])
-        right_splitter.setStretchFactor(0, 3)
-        right_splitter.setStretchFactor(1, 2)
-        layout.addWidget(right_splitter, 1)
-    def set_code_spectrum(self, periods, sa):
-        """设置规范谱作为目标谱"""
-        self._code_periods = periods
-        self._code_sa = sa
-        self._spec_plot.clear()
-        self._spec_plot.plot_code_spectrum(periods, sa, label="目标谱")
-        self._spec_plot.ax.set_title("目标反应谱", fontsize=11)
-        self._spec_plot.refresh()
-
-    def _run_generation(self):
-        """执行多 trial 人工波生成"""
-        if self._code_sa is None:
-            QMessageBox.warning(self, "警告", "请先设置目标谱（在规范谱面板中设置）")
-            return
-
-        self._run_btn.setEnabled(False)
-        self._progress_bar.setValue(0)
-        self._progress_label.setText("正在生成...")
-        self._info_label.setText("")
-
-        self._worker = MultiTrialGeneratorWorker(
-            self._code_sa, self._code_periods,
-            n=self._npts_spin.value(),
-            dt=self._dt_spin.value(),
-            zeta=self._zeta_spin.value(),
-            pga=self._pga_spin.value(),
-            tol=self._tol_spin.value(),
-            max_iter=self._maxiter_spin.value(),
-            n_trials=self._trials_spin.value(),
-            parent=self,
+        # 结果呈现器与控制器
+        self._result_presenter = ResultPresenter(
+            spec_plot, time_plot, dark=self._dark
         )
-        self._worker.signals.progress.connect(self._on_progress)
-        self._worker.signals.finished.connect(self._on_generation_done)
-        self._worker.signals.error.connect(self._on_generation_error)
-        self._worker.start()
+        self._controller = GeneratorController()
+
+    def _connect_signals(self):
+        self._param_form.run_clicked.connect(self._run_generation)
+        self._controller.progress.connect(self._on_progress)
+        self._controller.finished.connect(self._on_finished)
+        self._controller.error.connect(self._on_error)
+
+        # 类型切换时更新右栏可见性
+        self._param_form.type_changed.connect(self._on_type_changed)
+
+    def _apply_panel_theme(self):
+        qss = _load_theme_qss(self._dark)
+        if qss:
+            self.setStyleSheet(qss)
+
+    def _on_type_changed(self, index):
+        label = GM_TYPE_LABELS[index]
+        is_nfp = (label == "近场脉冲 NFP")
+        self._right_panel.set_nfp_visible(is_nfp)
+        if is_nfp:
+            self._right_panel.set_fault_type(
+                self._param_form._fault_combo.currentText()
+            )
+        else:
+            self._right_panel.clear()
 
     def _on_progress(self, pct, text):
-        """实时更新进度条和迭代数值"""
-        self._progress_bar.setValue(pct)
-        self._progress_label.setText(text)
-    def _on_generation_done(self, result):
-        """多 trial 完成：result = {'best': EQSignal, 'all_results': [...], 'best_index': int}"""
-        self._run_btn.setEnabled(True)
-        self._progress_bar.setValue(100)
+        logger.info("[panel] progress pct=%s text=%s", pct, text)
+        self._progress.update(pct, text)
+        self._bottom_bar.set_progress_value(pct)
+        self._bottom_bar.set_status(text)
 
-        best = result['best']
-        all_results = result['all_results']
-        best_idx = result['best_index']
-        self._generated = best
+    # ── 生成触发 ──
 
-        # 先发射信号
-        self.wave_generated.emit(best)
+    def _run_generation(self):
+        label = self._param_form._type_combo.currentText()
+        is_general = (label == "一般人工波")
+        logger.info("[panel] run clicked label=%s is_general=%s", label, is_general)
+
+        if is_general and (self._code_sa is None or len(self._code_sa) == 0):
+            logger.warning("[panel] run blocked: target spectrum missing")
+            QMessageBox.warning(self, "警告",
+                                "请先设置目标谱（在规范谱面板中设置）")
+            return
+
+        params = self._param_form.get_params()
+        target_info = {
+            'periods': 0 if self._code_periods is None else len(self._code_periods),
+            'pga': float(max(self._code_sa)) if self._code_sa is not None and len(self._code_sa) > 0 else None,
+            'Tg': params.get('Tg'),
+        }
+        logger.info("[panel] dispatch generation params=%s target=%s",
+                    {
+                        'n': params['n'], 'dt': params['dt'], 'zeta': params['zeta'],
+                        'tol': params['tol'], 'max_iter': params['max_iter'],
+                        'n_trials': params['n_trials'], 'fm': params.get('fm', 0),
+                    }, target_info)
+        self._param_form._run_btn.setEnabled(False)
+        self._progress.start()
+        self._bottom_bar.set_status("正在生成...")
+        self._right_panel.clear()
+
+        if is_general:
+            self._controller.run_general(
+                self._param_form, self._code_periods, self._code_sa)
+        else:
+            self._controller.run_special(
+                self._param_form, self._code_periods, self._code_sa)
+
+    # ── 完成回调 ──
+
+    def _on_finished(self, result, label):
+        logger.info("[panel] finished signal received label=%s result_type=%s", label, type(result).__name__)
+        self._param_form._run_btn.setEnabled(True)
+        is_general = (label == "一般人工波")
+        is_nfp = (label == "近场脉冲 NFP")
 
         try:
-            colors = get_mpl_colors(self._dark)
-            palette = colors['palette']
+            if is_general:
+                info_lines, progress_text = self._result_presenter.present_general(
+                    result, self._code_periods, self._code_sa)
+                best = result['best']
+                # 记录关键指标
+                from seiswave.core.generator import WaveGenerator
+                from seiswave.core.spectrum import Spectra
+                pga = float(np.max(np.abs(best.acc)))
+                if self._code_periods is not None and self._code_sa is not None:
+                    spec = Spectra.compute(best.acc, best.dt, self._code_periods, 0.05, method='mixed')
+                    fit = WaveGenerator.fit_error(spec.sa, self._code_sa)
+                    logger.info("[panel] result metrics PGA=%.4f mean_err=%.2f%% max_err=%.2f%% trials=%s",
+                                pga, fit['mean_error']*100, fit['max_error']*100,
+                                result.get('n_trials', 1))
+                else:
+                    logger.info("[panel] result metrics PGA=%.4f (no target spectrum)", pga)
+            else:
+                info_lines, progress_text = self._result_presenter.present_special(
+                    result, label, self._code_periods, self._code_sa)
+                best = result
+                pga = float(np.max(np.abs(best.acc))) if hasattr(best, 'acc') else 0
+                logger.info("[panel] result metrics PGA=%.4f label=%s", pga, label)
 
-            # 计算所有 trial 的反应谱和误差
-            trial_spectra = []
-            trial_errors = []
-            for sig in all_results:
-                spec = Spectra.compute(sig.acc, sig.dt,
-                                       self._code_periods, 0.05)
-                fit = WaveGenerator.fit_error(spec.sa, self._code_sa)
-                trial_spectra.append(spec.sa)
-                trial_errors.append(fit)
+            self._progress.finish(info_lines, progress_text)
+            self._bottom_bar.set_progress_text(progress_text)
+            self._bottom_bar.set_status("生成完成")
 
-            best_fit = trial_errors[best_idx]
-            n_trials = len(all_results)
+            self._generated = best
+            self.wave_generated.emit(best)
 
-            info_lines = [
-                f"最优: Trial {best_idx+1}/{n_trials}",
-                f"PGA = {best.pga:.4f} g",
-                f"持时 = {best.duration:.2f} s",
-                f"最大偏差 = {best_fit['max_error']:.1%}",
-                f"均方根偏差 = {best_fit['mean_error']:.1%}",
-            ]
-            self._info_label.setText("\n".join(info_lines))
-            self._progress_label.setText(
-                f"完成: {n_trials} trials, 最优 Trial {best_idx+1}")
+            # 更新右栏
+            self._right_panel.set_info(info_lines)
+            if is_nfp:
+                self._right_panel.set_nfp_visible(True)
+                if hasattr(best, 'pulse_params') and best.pulse_params:
+                    self._right_panel.set_pulse_params(best.pulse_params)
+                if hasattr(best, 'pulse_metrics') and best.pulse_metrics:
+                    self._right_panel.set_baker_metrics(best.pulse_metrics)
+                self._right_panel.set_fault_type(
+                    self._param_form._fault_combo.currentText()
+                )
 
-            # 绘制反应谱对比（目标谱 + 各 trial + 最优高亮）
-            self._spec_plot.clear()
-            self._spec_plot.plot_code_spectrum(
-                self._code_periods, self._code_sa, label="目标谱")
-            for i, sa in enumerate(trial_spectra):
-                if i == best_idx:
-                    continue
-                self._spec_plot.ax.plot(
-                    self._code_periods, sa,
-                    color=palette[i % len(palette)],
-                    linewidth=1.0, alpha=0.4,
-                    label=f"Trial {i+1}")
-            # 最优 trial 高亮
-            self._spec_plot.ax.plot(
-                self._code_periods, trial_spectra[best_idx],
-                color=colors['primary'], linewidth=2.2,
-                label=f"Trial {best_idx+1} (最优)")
-            self._spec_plot.ax.legend(fontsize=8, framealpha=0.8)
-            self._spec_plot.ax.set_title("反应谱拟合对比", fontsize=11)
-            self._spec_plot.refresh()
-
-            # 绘制最优时程曲线
-            self._time_plot.clear()
-            ax = self._time_plot.ax
-            ax.plot(best.time, best.acc,
-                    color=colors['primary'], linewidth=0.6)
-            ax.set_xlabel("时间 (s)")
-            ax.set_ylabel("加速度 (g)")
-            ax.set_title(
-                f"人工波 Trial {best_idx+1} (PGA={best.pga:.3f}g)",
-                fontsize=11)
-            self._time_plot.refresh()
         except Exception as e:
-            self._info_label.setText(f"结果处理出错: {e}")
+            logger.exception("[panel] result presentation failed: %s", e)
+            self._progress.error(str(e))
+            self._bottom_bar.set_status(f"生成出错: {e}")
 
-    def _on_generation_error(self, err):
-        self._info_label.setText(f"生成出错: {err}")
-        self._progress_label.setText("生成失败")
-        self._run_btn.setEnabled(True)
+    def _on_error(self, err):
+        logger.error("[panel] worker error=%s", err)
+        self._param_form._run_btn.setEnabled(True)
+        self._progress.error(err)
+        self._bottom_bar.set_status(f"生成出错: {err}")
+
+    # ── 公共接口 ──
+
+    def set_code_spectrum(self, periods, sa):
+        """设置规范谱作为目标谱"""
+        logger.info("[panel] set_code_spectrum points=%s has_sa=%s", 0 if periods is None else len(periods), sa is not None)
+        self._code_periods = periods
+        self._code_sa = sa
+        if sa is not None and len(sa) > 0:
+            self._param_form.set_target_pga(max(sa))
+            self._param_form.set_target_info(f"已设置 ({len(sa)} 点, PGA={max(sa):.3f}g)")
+            self._param_form.set_code_spectrum_set(True)
+        else:
+            self._param_form.set_target_info("尚未设置")
+            self._param_form.set_code_spectrum_set(False)
+        self._center_panel.spec_plot.clear()
+        self._center_panel.spec_plot.plot_code_spectrum(periods, sa, label="目标谱")
+        self._center_panel.spec_plot.ax.set_title("目标反应谱", fontsize=11)
+        self._center_panel.spec_plot.refresh()
 
     def get_generated(self):
-        return self._generated
+        return self._result_presenter.get_generated()
 
     def set_dark(self, dark: bool):
         self._dark = dark
-        self._spec_plot.set_dark(dark)
-        self._time_plot.set_dark(dark)
+        self._center_panel.set_dark(dark)
+        self._result_presenter.set_dark(dark)
+        self._apply_panel_theme()
+
+    # ── 向后兼容属性委托（现有测试直接访问这些属性）──
+
+    @property
+    def _type_combo(self):
+        return self._param_form._type_combo
+
+    @property
+    def _special_group(self):
+        return self._param_form._special_group
+
+    @property
+    def _fault_combo(self):
+        return self._param_form._fault_combo
+
+    @property
+    def _dt_spin(self):
+        return self._param_form._dt_spin
+
+    @property
+    def _run_btn(self):
+        return self._param_form._run_btn

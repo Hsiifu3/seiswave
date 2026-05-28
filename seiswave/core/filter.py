@@ -13,6 +13,53 @@ import numpy as np
 from scipy import signal
 
 
+def correct_baseline(signal_or_acc, dt: float = None,
+                     method: str = 'poly', order: int = 2,
+                     copy: bool = True):
+    """独立基线校正入口。
+
+    Parameters
+    ----------
+    signal_or_acc : EQSignal or np.ndarray
+        可传入 EQSignal 对象，或裸加速度数组。
+    dt : float, optional
+        当传入裸数组时必须提供时间步长。
+    method : str
+        'poly' 或 'bilinear'
+    order : int
+        多项式去趋势阶数（仅 poly 有效）
+    copy : bool
+        传入 EQSignal 时，是否返回副本而非原地修改
+
+    Returns
+    -------
+    EQSignal or np.ndarray
+        与输入类型一致的校正结果。
+    """
+    from .signal import EQSignal
+
+    if isinstance(signal_or_acc, EQSignal):
+        sig = signal_or_acc.copy() if copy else signal_or_acc
+        if method == 'poly':
+            sig.acc = Filter.detrend(sig.acc, sig.dt, order=order)
+        elif method == 'bilinear':
+            sig.acc = Filter.bilinear_detrend(sig.acc)
+        else:
+            raise ValueError(f"未知的基线校正方法: {method}")
+        sig.a2vd()
+        return sig
+
+    if dt is None:
+        raise ValueError('传入裸加速度数组时必须提供 dt')
+
+    acc = np.asarray(signal_or_acc, dtype=np.float64)
+    if method == 'poly':
+        return Filter.detrend(acc, dt, order=order)
+    if method == 'bilinear':
+        return Filter.bilinear_detrend(acc)
+    raise ValueError(f"未知的基线校正方法: {method}")
+
+
 class Filter:
     """信号滤波与基线校正"""
 

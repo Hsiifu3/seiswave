@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
     QComboBox, QFormLayout, QPushButton, QFileDialog, QCheckBox,
     QLineEdit, QMessageBox, QTextEdit, QSpinBox, QSizePolicy,
+    QScrollArea,
 )
 from PySide6.QtCore import Qt
 
@@ -37,16 +38,24 @@ class ResultPanel(QWidget):
     def _setup_ui(self):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
 
-        # 左侧导出选项
+        # 左侧导出选项（用 QScrollArea 包裹避免拥挤）
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+
         param_widget = QWidget()
         param_widget.setMinimumWidth(320)
         param_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         param_layout = QVBoxLayout(param_widget)
         param_layout.setContentsMargins(0, 0, 0, 0)
+        param_layout.setSpacing(10)
 
         # 输出目录
         dir_group = QGroupBox("输出目录")
+        dir_group.setMinimumHeight(60)
         dir_layout = QHBoxLayout(dir_group)
         dir_layout.setSpacing(4)
         self._dir_edit = QLineEdit()
@@ -55,15 +64,18 @@ class ResultPanel(QWidget):
         dir_layout.addWidget(self._dir_edit, 1)
         self._browse_btn = QPushButton("浏览...")
         self._browse_btn.setProperty("secondary", True)
+        self._browse_btn.setMinimumHeight(32)
         self._browse_btn.clicked.connect(self._browse_output)
         dir_layout.addWidget(self._browse_btn)
         param_layout.addWidget(dir_group)
 
         # 组合设置
         combo_group = QGroupBox("波组合设置")
+        combo_group.setMinimumHeight(100)
         combo_form = QFormLayout(combo_group)
         combo_form.setLabelAlignment(Qt.AlignRight)
         combo_form.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        combo_form.setVerticalSpacing(8)
 
         self._n_natural_label = QLabel("0")
         combo_form.addRow("已选天然波:", self._n_natural_label)
@@ -80,8 +92,10 @@ class ResultPanel(QWidget):
 
         # 导出格式
         fmt_group = QGroupBox("导出选项")
+        fmt_group.setMinimumHeight(120)
         fmt_form = QFormLayout(fmt_group)
         fmt_form.setLabelAlignment(Qt.AlignRight)
+        fmt_form.setVerticalSpacing(8)
 
         self._wave_fmt_combo = QComboBox()
         self._wave_fmt_combo.addItems(["AT2 格式", "TXT 格式", "两种都导出"])
@@ -99,17 +113,20 @@ class ResultPanel(QWidget):
 
         # 导出按钮
         self._export_btn = QPushButton("一键导出（表格+图+报告）")
+        self._export_btn.setMinimumHeight(36)
         self._export_btn.clicked.connect(self._do_export)
         param_layout.addWidget(self._export_btn)
 
         # 报告按钮
         self._report_btn = QPushButton("生成选波报告")
         self._report_btn.setProperty("secondary", True)
+        self._report_btn.setMinimumHeight(36)
         self._report_btn.clicked.connect(self._generate_report)
         param_layout.addWidget(self._report_btn)
 
         param_layout.addStretch()
-        layout.addWidget(param_widget)
+        scroll.setWidget(param_widget)
+        layout.addWidget(scroll)
 
         # 右侧报告预览
         self._preview = QTextEdit()
@@ -219,6 +236,10 @@ class ResultPanel(QWidget):
 
     def _export_comparison_plot(self, out_dir, combiner):
         """导出反应谱对比图"""
+        import warnings
+        from pyparsing.warnings import PyparsingDeprecationWarning
+
+        warnings.filterwarnings("ignore", category=PyparsingDeprecationWarning)
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt

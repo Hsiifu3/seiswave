@@ -21,7 +21,10 @@
 import numpy as np
 import ctypes
 import os
+import logging
 from typing import Optional, Callable
+
+logger = logging.getLogger(__name__)
 
 # ── 加载 C 加速库 ──
 _c_lib = None
@@ -46,77 +49,99 @@ class WaveGenerator:
     MPR = 20  # 短/长周期分界：T < MPR*dt 用频域法
 
     @staticmethod
-    def generate(target_spectrum: np.ndarray, periods: np.ndarray,
+    def generate(target_spectrum: Optional[np.ndarray] = None,
+                 periods: Optional[np.ndarray] = None,
                  n: int = 4096, dt: float = 0.02, zeta: float = 0.05,
                  pga: float = 1.0, tol: float = 0.05, max_iter: int = 50,
-                 fm: int = 1,
-                 progress_callback: Optional[Callable] = None):
-        """基于目标反应谱迭代生成人工地震波
+                 fm: Optional[int] = None,
+                 progress_callback: Optional[Callable] = None,
+                 n_trials: int = 3,
+                 type: Optional[str] = None,
+                 Mw: Optional[float] = None,
+                 R: Optional[float] = None,
+                 Vs30: float = 760.0,
+                 fault_type: str = "strike_slip",
+                 **kwargs):
+        """统一入口：通用谱匹配 or 特殊地震动类型分发。
 
-        Parameters
-        ----------
-        target_spectrum : np.ndarray
-            目标反应谱值（Sa，单位与 pga 一致，通常为 g）
-        periods : np.ndarray
-            周期数组 (s)，递增排列
-        pga : float
-            目标 PGA (g)
-        tol : float
-            收敛容差（均方根相对偏差）
-        max_iter : int
-            最大迭代次数
-        fm : int
-            谱匹配方法：0=频域法(fitspectra)，1=时域法(adjustspectra，默认)
-        progress_callback : callable, optional
-            进度回调 fn(iteration, max_error, mean_error)
+        - 兼容旧调用：`generate(target_spectrum, periods, ...)`
+        - 新调用：`generate(type="FF"|"NF"|"NFP", Mw=..., R=..., ...)`
         """
-        from .signal import EQSignal as EQSig
         from .fortran_bridge import HAS_FORTRAN
 
+        if type is not None:
+            dispatch_fm = 0 if fm is None else fm
+            type_upper = str(type).upper()
+            if type_upper == "FF":
+                return FarFieldGenerator.generate(
+                    Mw=Mw, R=R, Vs30=Vs30, fault_type=fault_type,
+                    n=n, dt=dt, zeta=zeta, tol=tol, max_iter=max_iter,
+                    fm=dispatch_fm, progress_callback=progress_callback, **kwargs,
+                )
+            if type_upper == "NF":
+                return NearFieldNoPulseGenerator.generate(
+                    Mw=Mw, R=R, Vs30=Vs30, fault_type=fault_type,
+                    n=n, dt=dt, zeta=zeta, tol=tol, max_iter=max_iter,
+                    fm=dispatch_fm, progress_callback=progress_callback, **kwargs,
+                )
+            if type_upper == "NFP":
+                return NearFieldPulseGenerator.generate(
+                    Mw=Mw, R=R, Vs30=Vs30, fault_type=fault_type,
+                    n=n, dt=dt, zeta=zeta, tol=tol, max_iter=max_iter,
+                    fm=dispatch_fm, progress_callback=progress_callback, **kwargs,
+                )
+            raise ValueError(f"无效的地震动类型: {type}")
+
+        if target_spectrum is None or periods is None:
+            raise ValueError("target_spectrum 不能为空（或未提供 type）")
+
+        general_fm = 1 if fm is None else fm
         target_spectrum = np.asarray(target_spectrum, dtype=np.float64)
         periods = np.asarray(periods, dtype=np.float64)
 
-        valid = periods > 0
+        valid = (periods > 0) & (target_spectrum > 1e-12)
         ctrl_periods = periods[valid]
         ctrl_target = target_spectrum[valid].copy()
         nP_orig = len(ctrl_periods)
 
         peak0 = pga
 
-        # ── Fortran 快速路径 ──
-        if HAS_FORTRAN:
-            return WaveGenerator._generate_fortran(
-                ctrl_periods, ctrl_target, nP_orig, n, dt, zeta, peak0,
-                tol, max_iter, fm, progress_callback)
+        # ── Fortran 快速路径（当前频域法有已知精度问题，暂禁用）──
+        # if HAS_FORTRAN:
+        #     return WaveGenerator._generate_fortran(
+        #         ctrl_periods, ctrl_target, nP_orig, n, dt, zeta, peak0,
+        #         tol, max_iter, general_fm, progress_callback)
 
         # ── Python 回退路径 ──
         return WaveGenerator._generate_python(
             ctrl_periods, ctrl_target, nP_orig, n, dt, zeta, peak0,
-            tol, max_iter, fm, progress_callback)
+            tol, max_iter, general_fm, progress_callback,
+            n_trials=n_trials)
 
     @staticmethod
     def _generate_fortran(ctrl_periods, ctrl_target, nP_orig, n, dt, zeta,
                           peak0, tol, max_iter, fm, progress_callback):
-        """Fortran 加速生成路径
+        """Fortran 加速生成路径。
 
-        优化策略（参考 EQSignal 原始项目）：
-        - 控制点降采样到 ≤50 个（对数分布），避免 O(nP²) 爆炸
-        - 直接调用 fitspectrum 总入口，不在 Python 层重复扩展谱
-        - 不预缩放 PGA，让 Fortran 内部 adjustpeak 处理
+        对 fm=1 的时域谱匹配，内部控制点可先降采样到较小规模，
+        但最终误差仍使用完整目标谱验算，兼顾稳定性与展示一致性。
         """
         from .signal import EQSignal as EQSig
         from .fortran_bridge import _eqs, spectrum_mixed
 
-        MAX_CTRL = 50  # adjustspectra 的 O(nP²) 限制
-
-        # 降采样控制点（对数分布）
-        if nP_orig > MAX_CTRL:
-            idx = np.unique(np.round(np.linspace(0, nP_orig - 1, MAX_CTRL)).astype(int))
-            P = np.ascontiguousarray(ctrl_periods[idx], dtype=np.float64)
-            SPAT = np.ascontiguousarray(ctrl_target[idx], dtype=np.float64)
+        if fm == 1 and nP_orig > 50:
+            P_ctrl, SPAT_ctrl = WaveGenerator._downsample_control_points(
+                ctrl_periods, ctrl_target, max_ctrl=50
+            )
+            nP_ctrl = len(P_ctrl)
+            logger.info("控制点降采样: %d → %d (fm=1)", nP_orig, nP_ctrl)
         else:
-            P = np.ascontiguousarray(ctrl_periods, dtype=np.float64)
-            SPAT = np.ascontiguousarray(ctrl_target, dtype=np.float64)
+            P_ctrl = np.asarray(ctrl_periods, dtype=np.float64).copy()
+            SPAT_ctrl = np.asarray(ctrl_target, dtype=np.float64).copy()
+            nP_ctrl = nP_orig
+
+        P = np.ascontiguousarray(P_ctrl, dtype=np.float64)
+        SPAT = np.ascontiguousarray(SPAT_ctrl, dtype=np.float64)
 
         n_trials = 3
         global_best_acc = None
@@ -155,8 +180,9 @@ class WaveGenerator:
 
     @staticmethod
     def _generate_python(ctrl_periods, ctrl_target, nP_orig, n, dt, zeta,
-                         peak0, tol, max_iter, fm, progress_callback):
-        """Python 回退生成路径"""
+                         peak0, tol, max_iter, fm, progress_callback,
+                         n_trials=3):
+        """Python 回退生成路径。"""
         from .signal import EQSignal as EQSig
 
         if fm == 0:
@@ -177,16 +203,33 @@ class WaveGenerator:
             else:
                 SPAT[0] = ctrl_target[0]
                 SPAT[nP_orig+1] = ctrl_target[0]
+
+            P_ctrl = P
+            SPAT_ctrl = SPAT
+            nP_ctrl = nP
         else:
-            # ── 时域法：直接使用原始周期 ──
-            nP = nP_orig
+            # ── 时域法：内部控制点可降采样，最终误差仍用完整谱验算 ──
+            if nP_orig > 50:
+                P_ctrl, SPAT_ctrl = WaveGenerator._downsample_control_points(
+                    ctrl_periods, ctrl_target, max_ctrl=50
+                )
+                nP_ctrl = len(P_ctrl)
+                logger.info("控制点降采样: %d → %d (fm=1)", nP_orig, nP_ctrl)
+            else:
+                P_ctrl = np.asarray(ctrl_periods, dtype=np.float64).copy()
+                SPAT_ctrl = np.asarray(ctrl_target, dtype=np.float64).copy()
+                nP_ctrl = nP_orig
+
             P = ctrl_periods
             SPAT = ctrl_target
 
         # ── 多 trial 取最优 ──
-        n_trials = 3
         global_best_acc = None
         global_best_error = float('inf')
+
+        # 预判断 Fortran 可用性（仅时域法需要）
+        # 当前实验：fm=1 强制走 Python 路径，验证两阶段增压策略
+        use_fortran_adjust = False
 
         for trial in range(n_trials):
             # 初始信号：从目标谱估计功率谱（复现 initArtWave）
@@ -209,29 +252,68 @@ class WaveGenerator:
 
             acc = WaveGenerator._init_art_wave(n, dt, zeta, P_ext, SPAT_ext,
                                                 nP_ext, seed=trial * 37 + 13)
-            # 缩放到目标 PGA
-            pk = np.max(np.abs(acc))
-            if pk > 0:
-                acc *= peak0 / pk
 
             # 包络调制
             envelope = WaveGenerator._envelope(n, dt)
             acc *= envelope
-            pk = np.max(np.abs(acc))
-            if pk > 0:
-                acc *= peak0 / pk
+
+            # fm=0 保持原有预缩放逻辑；fm=1 交给后续两阶段增压处理
+            if fm == 0:
+                pk = np.max(np.abs(acc))
+                if pk > 0:
+                    acc *= peak0 / pk
 
             # 谱匹配迭代
             if fm == 0:
                 acc, best_aerror = WaveGenerator._fitspectra(
                     acc, n, dt, zeta, P, nP, SPAT, tol, max_iter, peak0,
-                    progress_callback if trial == 0 else None
+                    progress_callback
                 )
             else:
-                acc, best_aerror = WaveGenerator._adjustspectra(
-                    acc, n, dt, zeta, P, nP, SPAT, tol, max_iter,
-                    progress_callback if trial == 0 else None
-                )
+                if use_fortran_adjust:
+                    from .fortran_bridge import adjust_spectra
+                    acc_f = adjust_spectra(
+                        acc, dt, zeta,
+                        np.ascontiguousarray(P_ctrl, dtype=np.float64),
+                        np.ascontiguousarray(SPAT_ctrl, dtype=np.float64),
+                        tol, max_iter, 1,
+                    )
+                    # 强制确保只取前 n 点并维持 PGA
+                    acc = np.asarray(acc_f[:n], dtype=np.float64)
+                    pk = np.max(np.abs(acc))
+                    if pk > 0:
+                        acc *= peak0 / pk
+                    # 计算拟合误差用于选优
+                    from .spectrum import Spectra
+                    spec = Spectra.compute(acc, dt, ctrl_periods, zeta, method="mixed")
+                    e = (np.abs(spec.sa) - ctrl_target) / np.maximum(ctrl_target, 1e-30)
+                    best_aerror = float(np.sqrt(np.mean(e * e)))
+                    if progress_callback and trial == 0:
+                        progress_callback(max_iter, float(np.max(np.abs(e))), best_aerror)
+                else:
+                    # 阶段1：低PGA下修形
+                    peak_low = float(np.max(np.abs(acc)))
+                    acc, _ = WaveGenerator._adjustspectra(
+                        acc, n, dt, zeta, P_ctrl, nP_ctrl, SPAT_ctrl, tol, max_iter,
+                        progress_callback
+                    )
+                    
+                    # 阶段2：逐步增压到目标PGA
+                    if peak_low < peak0 * 0.95:
+                        n_steps = max(2, min(5, int((peak0 - peak_low) / 0.02) + 1))
+                        step_peaks = np.linspace(peak_low, peak0, n_steps)
+                        for step_peak in step_peaks[1:]:
+                            acc = WaveGenerator._adjust_peak(acc, step_peak)
+                            acc, _ = WaveGenerator._adjustspectra(
+                                acc, n, dt, zeta, P_ctrl, nP_ctrl, SPAT_ctrl, tol, max(5, max_iter // 3),
+                                None
+                            )
+                    
+                    # 计算最终误差
+                    from .spectrum import Spectra
+                    spec = Spectra.compute(acc, dt, ctrl_periods, zeta, method="mixed")
+                    e = (np.abs(spec.sa) - ctrl_target) / np.maximum(ctrl_target, 1e-30)
+                    best_aerror = float(np.sqrt(np.mean(e * e)))
 
             if best_aerror < global_best_error:
                 global_best_error = best_aerror
@@ -241,6 +323,112 @@ class WaveGenerator:
         result = EQSig(acc[:n], dt, name="artificial")
         result.a2vd()
         return result
+
+    @staticmethod
+    def _downsample_control_points(periods, target, max_ctrl=50):
+        """为 fm=1 的时域谱匹配降采样控制点。
+
+        该方法面向 GB50011 一类分段形状明显的目标谱：
+        保留首尾端点，并在上升段、平台段、下降段、长周期尾段
+        按不同权重抽点，避免将 300 个密集控制点直接送入
+        O(nP²) 的时域小波叠加谱匹配。
+        """
+        periods = np.asarray(periods, dtype=np.float64)
+        target = np.asarray(target, dtype=np.float64)
+        nP = len(periods)
+
+        if nP != len(target):
+            raise ValueError("periods 与 target 长度必须一致")
+        if nP <= max_ctrl:
+            return periods.copy(), target.copy()
+        if max_ctrl < 2:
+            raise ValueError("max_ctrl 必须至少为 2")
+
+        def _uniform_take(indices, count):
+            indices = np.asarray(indices, dtype=int)
+            if len(indices) == 0 or count <= 0:
+                return np.array([], dtype=int)
+            if len(indices) <= count:
+                return indices.copy()
+            take = np.linspace(0, len(indices) - 1, count)
+            take = np.round(take).astype(int)
+            take[0] = 0
+            take[-1] = len(indices) - 1
+            return indices[np.unique(take)]
+
+        peak_idx = int(np.argmax(target))
+        peak_val = float(target[peak_idx])
+        Tg_approx = None
+        if peak_val > 0.0:
+            threshold = peak_val * 0.98
+            for idx in range(peak_idx + 1, nP):
+                if target[idx] < threshold:
+                    Tg_approx = float(periods[idx])
+                    break
+
+        if Tg_approx is None or Tg_approx <= 0.1:
+            idx = np.unique(np.round(np.linspace(0, nP - 1, max_ctrl)).astype(int))
+            idx[0] = 0
+            idx[-1] = nP - 1
+            idx = np.unique(idx)
+            return periods[idx], target[idx]
+
+        T5g = 5.0 * Tg_approx
+        seg1 = np.where(periods < 0.1)[0]
+        seg2 = np.where((periods >= 0.1) & (periods <= Tg_approx))[0]
+        seg3 = np.where((periods > Tg_approx) & (periods <= T5g))[0]
+        seg4 = np.where(periods > T5g)[0]
+
+        budgets = [
+            min(len(seg1), max(5, int(round(max_ctrl * 0.15)))),
+            min(len(seg2), max(3, int(round(max_ctrl * 0.10)))),
+            min(len(seg3), max(12, int(round(max_ctrl * 0.55)))),
+            min(len(seg4), max(5, int(round(max_ctrl * 0.20)))),
+        ]
+        segments = [seg1, seg2, seg3, seg4]
+
+        chosen_parts = [_uniform_take(seg, budget) for seg, budget in zip(segments, budgets)]
+        chosen = np.unique(np.concatenate([part for part in chosen_parts if len(part) > 0] + [np.array([0, nP - 1], dtype=int)]))
+
+        if len(chosen) < max_ctrl:
+            remaining = np.setdiff1d(np.arange(nP, dtype=int), chosen, assume_unique=False)
+            if len(remaining) > 0:
+                extra = _uniform_take(remaining, max_ctrl - len(chosen))
+                chosen = np.unique(np.concatenate([chosen, extra]))
+
+        if len(chosen) > max_ctrl:
+            removable_groups = [
+                np.intersect1d(chosen, seg2, assume_unique=False),
+                np.intersect1d(chosen, seg1, assume_unique=False),
+                np.intersect1d(chosen, seg4, assume_unique=False),
+                np.intersect1d(chosen, seg3, assume_unique=False),
+            ]
+            protected = {0, nP - 1}
+            removable = []
+            for group in removable_groups:
+                mids = [idx for idx in group.tolist() if idx not in protected]
+                if len(mids) > 2:
+                    removable.extend(mids[1:-1])
+                else:
+                    removable.extend(mids)
+            remove_need = len(chosen) - max_ctrl
+            if remove_need > 0 and removable:
+                removable = np.asarray(removable, dtype=int)
+                drop = _uniform_take(removable, min(remove_need, len(removable)))
+                chosen = np.setdiff1d(chosen, drop, assume_unique=False)
+
+        if len(chosen) > max_ctrl:
+            chosen = _uniform_take(chosen, max_ctrl)
+            chosen[0] = 0
+            chosen[-1] = nP - 1
+            chosen = np.unique(chosen)
+            if len(chosen) < max_ctrl:
+                remaining = np.setdiff1d(np.arange(nP, dtype=int), chosen, assume_unique=False)
+                extra = _uniform_take(remaining, max_ctrl - len(chosen))
+                chosen = np.unique(np.concatenate([chosen, extra]))
+
+        chosen = np.sort(chosen)
+        return periods[chosen].copy(), target[chosen].copy()
 
     @staticmethod
     def _init_art_wave(n, dt, zeta, P, SPT, nP, seed=42):
@@ -285,6 +473,7 @@ class WaveGenerator:
         # 构造频域信号
         rng = np.random.default_rng(seed=seed)
         af = np.zeros(nfft, dtype=complex)
+        max_sptf = float(np.max(SPTf[IPf1:IPf2+1])) if IPf2 >= IPf1 else 0.0
 
         for k in range(IPf1, IPf2 + 1):
             phi = rng.uniform(0, TWO_PI)
@@ -298,7 +487,17 @@ class WaveGenerator:
                 Saw = (zeta / PI / wk) * SPTf[k]**2 / np.log(1.0 / log_arg)
             else:
                 Saw = (zeta / PI / wk) * SPTf[k]**2
+
+            # 对接近目标谱平台峰值的频带做温和平滑增强，
+            # 以部分抵消 Vanmarcke 公式中 1/wk 带来的系统性低频偏置。
+            if max_sptf > 0.0:
+                plateau_ratio = SPTf[k] / max_sptf
+                plateau_weight = 1.0 + 0.4 / (1.0 + np.exp(-(plateau_ratio - 0.85) / 0.05))
+                Saw *= plateau_weight
+
             Saw = max(Saw, 0.0)
+            if not np.isfinite(Saw):
+                Saw = 0.0
             Ak = 2.0 * np.sqrt(Saw * TWO_PI * fs * nfft / 2)
             # 正频率
             af[k] = Ak * (np.cos(phi) + 1j * np.sin(phi))
@@ -612,10 +811,19 @@ class WaveGenerator:
             M[~diag_mask] *= 0.618
 
             # 最小二乘求解 M * dR_new = dR
+            # 回退到 numpy lstsq，因为 scipy gelsd 在此场景下效果不佳
             dR_solved, _, _, _ = np.linalg.lstsq(M, dR, rcond=None)
+            # 清理数值异常，防止后续 matmul 溢出/NaN
+            dR_solved = np.nan_to_num(dR_solved, nan=0.0, posinf=0.0, neginf=0.0)
+            dR_solved = np.clip(dR_solved, -1e6, 1e6)
 
-            # 叠加小波（向量化）
-            a += W @ dR_solved
+            # 叠加小波（向量化）；清理坏数值，避免矩阵乘法放大异常
+            W_safe = np.nan_to_num(W, nan=0.0, posinf=0.0, neginf=0.0)
+            with np.errstate(divide='ignore', over='ignore', invalid='ignore'):
+                delta_a = W_safe @ dR_solved
+            delta_a = np.nan_to_num(delta_a, nan=0.0, posinf=0.0, neginf=0.0)
+            a = np.nan_to_num(a, nan=0.0, posinf=0.0, neginf=0.0)
+            a += delta_a
 
             # adjustpeak
             a = WaveGenerator._adjust_peak(a, peak0)
@@ -866,14 +1074,29 @@ class WaveGenerator:
                     spi_long.ctypes.data_as(ctypes.POINTER(ctypes.c_int)),
                 )
             else:
-                from .spectrum import Spectra
-                for i in range(n_long):
-                    ra_rel, rv, rd = Spectra._newmark_beta(
-                        acc_c, dt, long_periods[i], zeta)
-                    abs_acc = -ra_rel + acc_c[:len(ra_rel)]
-                    idx = np.argmax(np.abs(abs_acc))
-                    spa_long[i] = abs_acc[idx]
-                    spi_long[i] = idx + 1
+                from concurrent.futures import ThreadPoolExecutor
+                from .spectrum import HAS_NUMBA, Spectra, _newmark_beta_task
+
+                if HAS_NUMBA and n_long > 1:
+                    tasks = [(acc_c, dt, float(T), zeta) for T in long_periods]
+                    with ThreadPoolExecutor() as executor:
+                        results = list(executor.map(_newmark_beta_task, tasks))
+                    for i, (ra_rel, rv, rd) in enumerate(results):
+                        abs_acc = -ra_rel + acc_c[:len(ra_rel)]
+                        idx = np.argmax(np.abs(abs_acc))
+                        spa_long[i] = abs_acc[idx]
+                        spi_long[i] = idx + 1
+                else:
+                    out_ra = np.zeros(n, dtype=np.float64)
+                    out_rv = np.zeros(n, dtype=np.float64)
+                    out_rd = np.zeros(n, dtype=np.float64)
+                    for i in range(n_long):
+                        ra_rel, rv, rd = Spectra._newmark_beta(
+                            acc_c, dt, long_periods[i], zeta, out_ra, out_rv, out_rd)
+                        abs_acc = -ra_rel + acc_c[:len(ra_rel)]
+                        idx = np.argmax(np.abs(abs_acc))
+                        spa_long[i] = abs_acc[idx]
+                        spi_long[i] = idx + 1
 
             spa[m:nP] = spa_long
             spi[m:nP] = spi_long
@@ -882,11 +1105,19 @@ class WaveGenerator:
 
     @staticmethod
     def _error(y, y0, n):
-        """相对误差（复现 error）：跳过首尾，用于 fitspectra"""
+        """相对误差（复现 error）：跳过首尾与近零目标点。"""
         if n <= 2:
-            e = np.where(np.abs(y0) > 1e-30, (y - y0) / y0, 0.0)
+            section_y = y[:n]
+            section_y0 = y0[:n]
         else:
-            e = (y[1:n-1] - y0[1:n-1]) / y0[1:n-1]
+            section_y = y[1:n-1]
+            section_y0 = y0[1:n-1]
+
+        mask = np.abs(section_y0) > 1e-12
+        if not np.any(mask):
+            return 0.0, 0.0
+
+        e = (section_y[mask] - section_y0[mask]) / section_y0[mask]
         aerror = float(np.sqrt(np.mean(e * e)))
         merror = float(np.max(np.abs(e)))
         return aerror, merror
@@ -928,15 +1159,371 @@ class WaveGenerator:
 
     @staticmethod
     def fit_error(actual, target):
-        """计算拟合误差（复现 error，跳过首尾）"""
+        """计算拟合误差，跳过首尾与近零目标点。"""
+        actual = np.asarray(actual, dtype=np.float64)
+        target = np.asarray(target, dtype=np.float64)
         n = len(target)
         if n <= 2:
-            e = np.zeros(n)
-            for i in range(n):
-                if target[i] > 1e-30:
-                    e[i] = (actual[i] - target[i]) / target[i]
+            section_actual = actual[:n]
+            section_target = target[:n]
         else:
-            e = (actual[1:n-1] - target[1:n-1]) / target[1:n-1]
+            section_actual = actual[1:n-1]
+            section_target = target[1:n-1]
+
+        mask = np.abs(section_target) > 1e-12
+        if not np.any(mask):
+            return {'max_error': 0.0, 'mean_error': 0.0}
+
+        e = (section_actual[mask] - section_target[mask]) / section_target[mask]
         e_max = float(np.max(np.abs(e))) if len(e) > 0 else 0.0
         e_mean = float(np.sqrt(np.mean(e ** 2))) if len(e) > 0 else 0.0
         return {'max_error': e_max, 'mean_error': e_mean}
+
+
+def create_ground_motion(type, Mw, R, Vs30=760.0, fault_type="strike_slip",
+                         n=4096, dt=0.02, zeta=0.05, tol=0.05, max_iter=80,
+                         **kwargs):
+    """便捷工厂函数：按类型创建特殊地震动。"""
+    from .gmpe import GMPEAdapter, FaultType, MotionType
+
+    ft_map = {
+        "strike_slip": FaultType.STRIKE_SLIP,
+        "normal": FaultType.NORMAL,
+        "reverse": FaultType.REVERSE,
+    }
+    ft = ft_map.get(fault_type, FaultType.STRIKE_SLIP)
+
+    if type == "FF":
+        return FarFieldGenerator.generate(
+            Mw=Mw, R=R, Vs30=Vs30, fault_type=fault_type,
+            n=n, dt=dt, zeta=zeta, tol=tol, max_iter=max_iter,
+            **kwargs,
+        )
+    elif type == "NF":
+        return NearFieldNoPulseGenerator.generate(
+            Mw=Mw, R=R, Vs30=Vs30, fault_type=fault_type,
+            n=n, dt=dt, zeta=zeta, tol=tol, max_iter=max_iter,
+            **kwargs,
+        )
+    elif type == "NFP":
+        return NearFieldPulseGenerator.generate(
+            Mw=Mw, R=R, Vs30=Vs30, fault_type=fault_type,
+            n=n, dt=dt, zeta=zeta, tol=tol, max_iter=max_iter,
+            **kwargs,
+        )
+    else:
+        raise ValueError(f"无效的地震动类型: {type}")
+
+
+# ═══════════════════ 特殊地震动生成器 ═══════════════════
+
+
+# ── 通用辅助 ──
+
+_FaultType_map = {
+    "strike_slip": lambda: FaultType.STRIKE_SLIP,
+    "normal": lambda: FaultType.NORMAL,
+    "reverse": lambda: FaultType.REVERSE,
+}
+
+
+def _resolve_fault_type(fault_type: str):
+    """字符串断层类型 → FaultType 枚举（惰性导入避免循环依赖）。"""
+    from .gmpe import FaultType
+    ft_map = {
+        "strike_slip": FaultType.STRIKE_SLIP,
+        "normal": FaultType.NORMAL,
+        "reverse": FaultType.REVERSE,
+    }
+    return ft_map.get(fault_type, FaultType.STRIKE_SLIP)
+
+
+def _attach_spectrum_meta(sig, target_sa, periods):
+    """把目标谱和周期附加到 EQSignal 实例。"""
+    sig.total_spectrum = np.asarray(target_sa, dtype=np.float64)
+    sig.spectrum_periods = np.asarray(periods, dtype=np.float64)
+    return sig
+
+
+def _estimate_pga_from_spectrum(target_sa):
+    """用目标谱首点估计 PGA（频域法迭代用）。"""
+    if len(target_sa) == 0:
+        return 0.1
+    return float(np.max(target_sa))
+
+
+# ── FarFieldGenerator ──
+
+class FarFieldGenerator:
+    """远场地震动生成器：GMPE 远场目标谱 + 时域谱匹配 (fm=1)。"""
+
+    @classmethod
+    def generate(cls,
+                 Mw, R, Vs30=760, fault_type="strike_slip",
+                 n=None, dt=None, zeta=None,
+                 tol=0.05, max_iter=80, fm=1,
+                 progress_callback=None,
+                 **kwargs):
+        from .gmpe import GMPEAdapter, MotionType
+        n = n or 4096
+        dt = dt or 0.02
+        zeta = zeta or 0.05
+
+        ft = _resolve_fault_type(fault_type)
+        periods, target_sa = GMPEAdapter.compute_spectrum(
+            Mw=Mw, R=R, Vs30=Vs30,
+            fault_type=ft, motion_type=MotionType.FAR_FIELD,
+        )
+
+        pga = _estimate_pga_from_spectrum(target_sa)
+        sig = WaveGenerator.generate(
+            target_spectrum=target_sa, periods=periods,
+            n=n, dt=dt, zeta=zeta, pga=pga,
+            tol=tol, max_iter=max_iter, fm=fm,
+            progress_callback=progress_callback,
+        )
+        sig.name = f"FF_M{Mw:.1f}_R{R:.1f}"
+        return _attach_spectrum_meta(sig, target_sa, periods)
+
+
+# ── NearFieldNoPulseGenerator ──
+
+class NearFieldNoPulseGenerator:
+    """近场无脉冲地震动生成器：GMPE 近场目标谱 + 时域谱匹配 (fm=1)。"""
+
+    @classmethod
+    def generate(cls,
+                 Mw, R, Vs30=760, fault_type="strike_slip",
+                 n=None, dt=None, zeta=None,
+                 tol=0.05, max_iter=80, fm=1,
+                 progress_callback=None,
+                 **kwargs):
+        from .gmpe import GMPEAdapter, MotionType
+        n = n or 4096
+        dt = dt or 0.01
+        zeta = zeta or 0.05
+
+        ft = _resolve_fault_type(fault_type)
+        periods, target_sa = GMPEAdapter.compute_spectrum(
+            Mw=Mw, R=R, Vs30=Vs30,
+            fault_type=ft, motion_type=MotionType.NEAR_FIELD,
+        )
+
+        pga = _estimate_pga_from_spectrum(target_sa)
+        sig = WaveGenerator.generate(
+            target_spectrum=target_sa, periods=periods,
+            n=n, dt=dt, zeta=zeta, pga=pga,
+            tol=tol, max_iter=max_iter, fm=fm,
+            progress_callback=progress_callback,
+        )
+        sig.name = f"NF_M{Mw:.1f}_R{R:.1f}"
+        return _attach_spectrum_meta(sig, target_sa, periods)
+
+
+# ── NearFieldPulseGenerator ──
+
+class NearFieldPulseGenerator:
+    """近场脉冲地震动生成器：直接匹配 + 脉冲注入法。
+
+    策略：
+    1. 频域匹配 GMPE total_sa → base_signal
+    2. 时域注入 MP 脉冲分量，搜索最优缩放因子 sf
+    3. 小幅频域校正使叠加谱贴近目标
+    4. Baker 识别 has_pulse=True & confidence>=0.85，取 mean_error 最小
+    """
+
+    @classmethod
+    def generate(cls,
+                 Mw, R, Vs30=760, fault_type="strike_slip",
+                 n=None, dt=None, zeta=None,
+                 tol=0.05, max_iter=80, fm=0,
+                 progress_callback=None,
+                 phi=None, t_total=None,
+                 Tp_override=None, A_override=None,
+                 phi_override=None, t0_override=None,
+                 **kwargs):
+        from .gmpe import GMPEAdapter, MotionType
+        from .pulse import PulseCalculator, PulseWavelet, BakerPulseDetector
+        from .signal import EQSignal as EQSig
+        from .spectrum import Spectra
+
+        n = n or 4096
+        dt = dt or 0.01
+        zeta = zeta or 0.05
+
+        ft = _resolve_fault_type(fault_type)
+        # NFP 默认倾向 reverse（与旧版一致）
+        if fault_type not in ("strike_slip", "normal", "reverse"):
+            from .gmpe import FaultType
+            ft = FaultType.REVERSE
+
+        periods, total_sa = GMPEAdapter.compute_spectrum(
+            Mw=Mw, R=R, Vs30=Vs30,
+            fault_type=ft, motion_type=MotionType.NEAR_FIELD_PULSE,
+        )
+
+        # ── 1) 频域匹配生成基础信号 ──
+        pga = _estimate_pga_from_spectrum(total_sa)
+        base_signal = WaveGenerator.generate(
+            target_spectrum=total_sa, periods=periods,
+            n=n, dt=dt, zeta=zeta, pga=pga,
+            tol=tol, max_iter=max_iter, fm=0,
+            progress_callback=progress_callback,
+        )
+
+        # ── 2) 生成 MP 脉冲分量 ──
+        t_total_eff = t_total if t_total is not None else n * dt
+        pulse_params = PulseCalculator.compute_params(
+            Mw=Mw, R=R, fault_type=fault_type,
+            phi=phi, t_total=t_total_eff,
+            Tp_override=Tp_override, A_override=A_override,
+            phi_override=phi_override, t0_override=t0_override,
+        )
+        pulse_vel_cm, pulse_acc_cm = PulseWavelet.generate(pulse_params, dt, n)
+        # cm/s² → g
+        pulse_acc_g = pulse_acc_cm / 980.0
+
+        # ── 3) 搜索最优缩放因子 + 小幅频域校正 ──
+        sf_candidates = [0.2, 0.3, 0.5, 0.7, 1.0, 1.3, 1.5]
+
+        best_sig = None
+        best_error = float("inf")
+        best_sf = 1.0
+        best_metrics = None
+
+        for sf in sf_candidates:
+            combined_acc = base_signal.acc + sf * pulse_acc_g
+            corrected_acc = cls._small_freq_correct(
+                combined_acc, dt, total_sa, periods
+            )
+
+            sig = EQSig(corrected_acc, dt, name="artificial")
+            sig.a2vd()
+
+            # Baker 检测（速度转为 cm/s）
+            vel_cm_s = sig.vel * 980.0
+            metrics = BakerPulseDetector.analyze(vel_cm_s, dt)
+
+            gen_sa = Spectra.compute(
+                sig.acc, sig.dt, periods, zeta=0.05, method="mixed"
+            ).sa
+            fit = WaveGenerator.fit_error(gen_sa, total_sa)
+
+            if metrics["has_pulse"] and metrics["confidence"] >= 0.85:
+                if fit["mean_error"] < best_error:
+                    best_error = fit["mean_error"]
+                    best_sig = sig
+                    best_sf = sf
+                    best_metrics = metrics
+
+        # 若没有任何候选满足 Baker 门槛，退而求其次：选 confidence 最高的
+        if best_sig is None:
+            best_score = -float("inf")
+            for sf in sf_candidates:
+                combined_acc = base_signal.acc + sf * pulse_acc_g
+                corrected_acc = cls._small_freq_correct(
+                    combined_acc, dt, total_sa, periods
+                )
+                sig = EQSig(corrected_acc, dt, name="artificial")
+                sig.a2vd()
+
+                vel_cm_s = sig.vel * 980.0
+                metrics = BakerPulseDetector.analyze(vel_cm_s, dt)
+
+                gen_sa = Spectra.compute(
+                    sig.acc, sig.dt, periods, zeta=0.05, method="mixed"
+                ).sa
+                fit = WaveGenerator.fit_error(gen_sa, total_sa)
+
+                # 评分：confidence 为主，mean_error 为辅
+                score = metrics["confidence"] * 10.0 - fit["mean_error"]
+                if score > best_score:
+                    best_score = score
+                    best_sig = sig
+                    best_sf = sf
+                    best_metrics = metrics
+
+        # ── 4) 附加元数据（保留旧版接口）──
+        best_sig.name = f"NFP_M{Mw:.1f}_R{R:.1f}"
+        best_sig.pulse_params = pulse_params
+        best_sig.pulse_metrics = best_metrics
+        best_sig.pulse_acc = pulse_acc_g * best_sf          # g
+        best_sig.pulse_vel = pulse_vel_cm * best_sf / 100.0  # m/s (EQSignal 常规单位)
+        best_sig.residual_acc = base_signal.acc.copy()
+
+        # 残余谱：基础信号的反应谱
+        residual_sa = Spectra.compute(
+            base_signal.acc, dt, periods, zeta=0.05, method="mixed"
+        ).sa
+        best_sig.residual_spectrum = residual_sa
+
+        # 脉冲谱
+        pulse_sa = Spectra.compute(
+            best_sig.pulse_acc, dt, periods, zeta=0.05, method="mixed"
+        ).sa
+        best_sig.pulse_spectrum = pulse_sa
+
+        best_sig.total_spectrum = np.asarray(total_sa, dtype=np.float64)
+        best_sig.spectrum_periods = np.asarray(periods, dtype=np.float64)
+        best_sig.scaling_factor = best_sf
+        return best_sig
+
+    @staticmethod
+    def _small_freq_correct(acc, dt, target_sa, periods):
+        """小幅频域校正：ratio = target / current，clip [0.6, 1.4]。"""
+        from scipy.interpolate import interp1d
+        from .spectrum import Spectra
+
+        n = len(acc)
+        current_sa = Spectra.compute(
+            acc, dt, periods, zeta=0.05, method="mixed"
+        ).sa
+        ratio = target_sa / np.maximum(current_sa, 1e-30)
+        ratio = np.clip(ratio, 0.6, 1.4)
+
+        # FFT
+        nfft = WaveGenerator._nextpow2(n) * 4
+        af = np.fft.rfft(acc, n=nfft)
+
+        # 正频率轴
+        fs = 1.0 / dt
+        df = fs / nfft
+        pos_freq = np.arange(1, len(af)) * df
+
+        # 周期递增 → 频率递减；反转后频率递增
+        T_valid = periods[periods > 0]
+        f_ctrl = 1.0 / T_valid[::-1]
+        ratio_ctrl = ratio[periods > 0][::-1]
+
+        if len(f_ctrl) >= 2:
+            f_interp = interp1d(
+                np.log(f_ctrl), ratio_ctrl,
+                kind="linear", bounds_error=False,
+                fill_value=(ratio_ctrl[0], ratio_ctrl[-1]),
+            )
+            ratio_freq = f_interp(np.log(pos_freq))
+            ratio_freq = np.nan_to_num(ratio_freq, nan=1.0)
+        else:
+            ratio_freq = np.ones(len(pos_freq))
+
+        Rf = np.ones(len(af), dtype=np.float64)
+        Rf[1:] = ratio_freq
+
+        af *= Rf
+        corrected = np.fft.irfft(af, n=nfft)[:n]
+        return corrected
+
+    @classmethod
+    def validate(cls, sig, target_spectrum=None, periods=None, zeta=0.05):
+        """验证生成信号与目标谱的匹配误差（backward-compatible）。"""
+        from .spectrum import Spectra
+        if target_spectrum is None or periods is None:
+            if hasattr(sig, "total_spectrum") and hasattr(sig, "spectrum_periods"):
+                target_spectrum = sig.total_spectrum
+                periods = sig.spectrum_periods
+            else:
+                raise ValueError("validate 需要 target_spectrum 和 periods")
+        gen_sa = Spectra.compute(
+            sig.acc, sig.dt, periods, zeta=zeta, method="mixed"
+        ).sa
+        return WaveGenerator.fit_error(gen_sa, target_spectrum)

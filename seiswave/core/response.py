@@ -2,7 +2,12 @@
 结构响应分析模块
 """
 
+import warnings
+
 import numpy as np
+from pyparsing.warnings import PyparsingDeprecationWarning
+
+warnings.filterwarnings("ignore", category=PyparsingDeprecationWarning)
 import matplotlib.pyplot as plt
 
 # 字体配置：中文宋体(Songti SC) + 英文 Times New Roman
@@ -23,7 +28,7 @@ class Response:
             period: 周期，默认2.0秒
         """
         self.acc = eqsignal.acc
-        self.t = eqsignal.t
+        self.t = eqsignal.time
         self.dt = eqsignal.dt
         self.n = eqsignal.n
         self.zeta = zeta

@@ -54,22 +54,22 @@ def parse_peer_filename(filename: str) -> dict:
     basename = os.path.splitext(os.path.basename(filename))[0]
     result = {'rsn': 0, 'event_tag': '', 'station_tag': '', 'component': ''}
 
-    # 解析 RSN
+    # 只有符合 PEER 命名的文件才从文件名推断 component；
+    # 普通文件名最多只提取 EVENT/STATION，避免把临时文件随机后缀误判成 component。
     m = re.match(r'RSN(\d+)_(.*)', basename)
-    if m:
+    has_rsn = m is not None
+    if has_rsn:
         result['rsn'] = int(m.group(1))
         rest = m.group(2)
     else:
         rest = basename
 
-    # 拆分剩余部分：EVENT_STATION（最后一个下划线分隔台站+分量）
     parts = rest.split('_')
     if len(parts) >= 2:
         result['event_tag'] = '_'.join(parts[:-1])
         result['station_tag'] = parts[-1]
-        # 分量方向：台站标识中的数字后缀或 UP/DWN 等
-        comp = parts[-1]
-        result['component'] = comp
+        if has_rsn:
+            result['component'] = parts[-1]
     elif len(parts) == 1:
         result['event_tag'] = parts[0]
 

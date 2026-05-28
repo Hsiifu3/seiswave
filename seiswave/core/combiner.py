@@ -9,9 +9,12 @@ import os
 import io
 import json
 import base64
+import warnings
 import numpy as np
 from dataclasses import dataclass, field
 from typing import Optional
+
+from pyparsing.warnings import PyparsingDeprecationWarning
 
 from .peer_db import PeerDatabase, PeerRecord
 from .selector import SelectionResult, SelectionConfig
@@ -373,6 +376,7 @@ class Combiner:
         str
             HTML 文件路径
         """
+        warnings.filterwarnings("ignore", category=PyparsingDeprecationWarning)
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt

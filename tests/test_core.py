@@ -373,6 +373,40 @@ class TestFilter:
         idx_20 = np.argmin(np.abs(freqs - 20))
         assert fft_filt[idx_20] < fft_orig[idx_20] * 0.1
 
+    def test_correct_baseline_array_poly(self):
+        from seiswave.core import correct_baseline
+        n = 800
+        dt = 0.02
+        t = np.arange(n) * dt
+        acc = 0.2 * t + 0.05 + 0.01 * np.sin(2 * np.pi * 1.5 * t)
+        corrected = correct_baseline(acc, dt=dt, method='poly', order=1)
+        assert isinstance(corrected, np.ndarray)
+        assert abs(np.mean(corrected)) < 0.05
+
+    def test_correct_baseline_signal_returns_eqsignal(self):
+        from seiswave.core import EQSignal, correct_baseline
+        n = 800
+        dt = 0.02
+        t = np.arange(n) * dt
+        acc = 0.15 * t + 0.02 * np.sin(2 * np.pi * 2.0 * t)
+        sig = EQSignal(acc, dt)
+        corrected = correct_baseline(sig, method='poly', order=1)
+        assert corrected is not sig
+        assert corrected.n == sig.n
+        assert len(corrected.vel) == sig.n
+        assert abs(np.mean(corrected.acc)) < abs(np.mean(sig.acc))
+
+    def test_eqsignal_baseline_correction_inplace(self):
+        from seiswave.core import EQSignal
+        n = 600
+        dt = 0.02
+        t = np.arange(n) * dt
+        sig = EQSignal(0.1 * t + 0.01 * np.sin(2 * np.pi * 1.0 * t), dt)
+        sig.baseline_correction(method='poly', order=1)
+        assert len(sig.vel) == n
+        assert len(sig.disp) == n
+        assert abs(np.mean(sig.acc)) < 0.05
+
 
 # ═══════════════════ FFT Module ═══════════════════
 

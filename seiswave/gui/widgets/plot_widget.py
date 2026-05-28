@@ -10,6 +10,11 @@ Matplotlib 嵌入控件
 - 中文字体支持
 """
 
+import warnings
+
+from pyparsing.warnings import PyparsingDeprecationWarning
+
+warnings.filterwarnings("ignore", category=PyparsingDeprecationWarning)
 import matplotlib
 matplotlib.use('QtAgg')
 

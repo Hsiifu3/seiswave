@@ -6,9 +6,32 @@ Fortran 加速函数不释放 GIL，需要用 multiprocessing 隔离。
 """
 
 import os
+import time
+import uuid
+import logging
+import traceback
 import numpy as np
 import multiprocessing as mp
 from PySide6.QtCore import QThread, Signal, QObject, Qt
+
+logger = logging.getLogger(__name__)
+
+
+def _ensure_child_logging():
+    """spawn 子进程内兜底启用日志，避免调试信息丢失。"""
+    root = logging.getLogger()
+    if root.handlers:
+        return
+    logging.basicConfig(
+        filename='/tmp/seiswave.log',
+        level=logging.INFO,
+        format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+        force=True,
+    )
+
+
+def _algo_name(fm: int) -> str:
+    return 'time-domain' if int(fm) == 1 else 'freq-domain'
 
 
 class WorkerSignals(QObject):
@@ -22,25 +45,32 @@ class WorkerSignals(QObject):
 class BaseWorker(QThread):
     """后台计算基类"""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, job_id=None):
         super().__init__(parent)
         self.signals = WorkerSignals()
         self._cancelled = False
+        self._job_id = job_id or uuid.uuid4().hex[:8]
 
     def cancel(self):
         self._cancelled = True
+        logger.info("[%s] %s cancel requested", self._job_id, self.__class__.__name__)
 
     @property
     def is_cancelled(self):
         return self._cancelled
 
     def run(self):
+        logger.info("[%s] %s run started", self._job_id, self.__class__.__name__)
         self.signals.started.emit()
         try:
             result = self.execute()
             if not self._cancelled:
+                logger.info("[%s] %s run finished successfully", self._job_id, self.__class__.__name__)
                 self.signals.finished.emit(result)
+            else:
+                logger.info("[%s] %s run finished after cancellation", self._job_id, self.__class__.__name__)
         except Exception as e:
+            logger.exception("[%s] %s run failed: %s", self._job_id, self.__class__.__name__, e)
             self.signals.error.emit(str(e))
 
     def execute(self):
@@ -109,13 +139,19 @@ class SelectionWorker(BaseWorker):
         return self._selector.select(self._database, progress_cb=progress_cb)
 
 
-def _generator_subprocess(conn, target, periods, n, dt, zeta, pga, tol, max_iter):
+def _generator_subprocess(conn, target, periods, n, dt, zeta, pga, tol, max_iter, fm=0, job_id='unknown', trial_idx=None):
     """在独立进程中执行人工波生成（绕开 Fortran GIL 阻塞）"""
+    _ensure_child_logging()
+    trial_text = '' if trial_idx is None else f' trial={trial_idx+1}'
+    logger.info("[%s]%s subprocess start algo=%s n=%s dt=%.5f periods=%s pga=%.4f tol=%.4f max_iter=%s",
+                job_id, trial_text, _algo_name(fm), n, dt, len(periods), pga, tol, max_iter)
     try:
         from seiswave.core import WaveGenerator
 
         def progress_cb(iteration, max_err, mean_err):
             try:
+                logger.info("[%s]%s subprocess progress iter=%s max_err=%.6f mean_err=%.6f",
+                            job_id, trial_text, iteration, max_err, mean_err)
                 conn.send(('progress', iteration, max_err, mean_err))
             except Exception:
                 pass
@@ -124,11 +160,16 @@ def _generator_subprocess(conn, target, periods, n, dt, zeta, pga, tol, max_iter
             target, periods,
             n=n, dt=dt, zeta=zeta,
             pga=pga, tol=tol, max_iter=max_iter,
+            fm=fm,
             progress_callback=progress_cb,
+            n_trials=1,
         )
+        logger.info("[%s]%s subprocess done name=%s len=%s dt=%.5f",
+                    job_id, trial_text, result.name, len(result.acc), result.dt)
         conn.send(('done', result.acc, result.dt, result.name))
     except Exception as e:
-        conn.send(('error', str(e)))
+        logger.exception("[%s]%s subprocess failed: %s", job_id, trial_text, e)
+        conn.send(('error', ''.join(traceback.format_exception_only(type(e), e)).strip()))
     finally:
         conn.close()
 
@@ -137,8 +178,9 @@ class GeneratorWorker(BaseWorker):
     """人工波生成 Worker（子进程隔离，避免 Fortran GIL 阻塞）"""
 
     def __init__(self, target_spectrum, periods, n=4096, dt=0.02,
-                 zeta=0.05, pga=1.0, tol=0.05, max_iter=50, parent=None):
-        super().__init__(parent)
+                 zeta=0.05, pga=1.0, tol=0.05, max_iter=50, fm=0, parent=None,
+                 job_id=None):
+        super().__init__(parent, job_id=job_id)
         self._target = np.asarray(target_spectrum, dtype=np.float64)
         self._periods = np.asarray(periods, dtype=np.float64)
         self._n = n
@@ -147,11 +189,13 @@ class GeneratorWorker(BaseWorker):
         self._pga = pga
         self._tol = tol
         self._max_iter = max_iter
+        self._fm = fm
         self._process = None
 
     def _generate_inprocess(self):
         """兼容模式：子进程不可用时回退到主进程计算。"""
         from seiswave.core import WaveGenerator
+        logger.info("[%s] GeneratorWorker fallback to in-process algo=%s", self._job_id, _algo_name(self._fm))
 
         def progress_cb(iteration, max_err, mean_err):
             if self.is_cancelled:
@@ -160,12 +204,16 @@ class GeneratorWorker(BaseWorker):
             text = f"迭代 {iteration}: 最大误差 {max_err:.4f}, 平均误差 {mean_err:.4f}"
             self.signals.progress.emit(pct, text)
 
-        return WaveGenerator.generate(
+        result = WaveGenerator.generate(
             self._target, self._periods,
             n=self._n, dt=self._dt, zeta=self._zeta,
             pga=self._pga, tol=self._tol, max_iter=self._max_iter,
+            fm=self._fm,
             progress_callback=progress_cb,
+            n_trials=1,
         )
+        logger.info("[%s] GeneratorWorker in-process done name=%s len=%s", self._job_id, result.name, len(result.acc))
+        return result
 
     def cancel(self):
         super().cancel()
@@ -177,26 +225,47 @@ class GeneratorWorker(BaseWorker):
 
         parent_conn, child_conn = mp.Pipe()
 
+        logger.info("[%s] GeneratorWorker execute start algo=%s n=%s dt=%.5f periods=%s pga=%.4f tol=%.4f max_iter=%s",
+                    self._job_id, _algo_name(self._fm), self._n, self._dt, len(self._periods), self._pga, self._tol, self._max_iter)
         self._process = mp.Process(
             target=_generator_subprocess,
             args=(child_conn, self._target, self._periods,
                   self._n, self._dt, self._zeta, self._pga,
-                  self._tol, self._max_iter),
+                  self._tol, self._max_iter, self._fm, self._job_id, None),
             daemon=True,
         )
         try:
             self._process.start()
+            logger.info("[%s] GeneratorWorker child pid=%s started", self._job_id, self._process.pid)
         except Exception:
+            logger.exception("[%s] GeneratorWorker child start failed", self._job_id)
             parent_conn.close()
             return self._generate_inprocess()
 
+        start_time = time.monotonic()
+        timeout_seconds = max(120.0, float(self._max_iter) * 2.0)
+
         while self._process.is_alive() or parent_conn.poll():
             if self.is_cancelled:
+                logger.warning("[%s] GeneratorWorker cancelled, terminating child pid=%s", self._job_id, self._process.pid)
                 self._process.terminate()
                 raise InterruptedError("用户取消")
 
+            elapsed = time.monotonic() - start_time
+            if elapsed > timeout_seconds:
+                logger.warning("[%s] GeneratorWorker child timeout after %.2fs, switching to in-process", self._job_id, elapsed)
+                self._process.terminate()
+                self._process.join(timeout=1.0)
+                parent_conn.close()
+                self.signals.progress.emit(
+                    99,
+                    f"子进程超时 ({timeout_seconds:.0f}s)，切换兼容模式继续计算..."
+                )
+                return self._generate_inprocess()
+
             if parent_conn.poll(timeout=0.1):
                 msg = parent_conn.recv()
+                logger.info("[%s] GeneratorWorker received message type=%s", self._job_id, msg[0])
                 if msg[0] == 'progress':
                     _, iteration, max_err, mean_err = msg
                     pct = int(iteration / self._max_iter * 100)
@@ -206,12 +275,15 @@ class GeneratorWorker(BaseWorker):
                     _, acc, dt, name = msg
                     result = EQSignal(np.asarray(acc), dt, name=name)
                     result.a2vd()
+                    logger.info("[%s] GeneratorWorker child done name=%s len=%s", self._job_id, name, len(acc))
                     parent_conn.close()
                     return result
                 elif msg[0] == 'error':
+                    logger.error("[%s] GeneratorWorker child error: %s", self._job_id, msg[1])
                     parent_conn.close()
                     raise RuntimeError(msg[1])
 
+        logger.warning("[%s] GeneratorWorker child exited without done message, using in-process fallback", self._job_id)
         parent_conn.close()
         return self._generate_inprocess()
 
@@ -225,8 +297,8 @@ class MultiTrialGeneratorWorker(BaseWorker):
 
     def __init__(self, target_spectrum, periods, n=4096, dt=0.02,
                  zeta=0.05, pga=1.0, tol=0.05, max_iter=50,
-                 n_trials=3, parent=None):
-        super().__init__(parent)
+                 n_trials=3, fm=0, parent=None, job_id=None):
+        super().__init__(parent, job_id=job_id)
         self._target = np.asarray(target_spectrum, dtype=np.float64)
         self._periods = np.asarray(periods, dtype=np.float64)
         self._n = n
@@ -236,6 +308,7 @@ class MultiTrialGeneratorWorker(BaseWorker):
         self._tol = tol
         self._max_iter = max_iter
         self._n_trials = n_trials
+        self._fm = fm
         self._process = None
 
     def cancel(self):
@@ -247,25 +320,46 @@ class MultiTrialGeneratorWorker(BaseWorker):
         from seiswave.core.signal import EQSignal
 
         parent_conn, child_conn = mp.Pipe()
+        logger.info("[%s] MultiTrial start trial=%s/%s algo=%s", self._job_id, trial_idx + 1, self._n_trials, _algo_name(self._fm))
         self._process = mp.Process(
             target=_generator_subprocess,
             args=(child_conn, self._target, self._periods,
                   self._n, self._dt, self._zeta, self._pga,
-                  self._tol, self._max_iter),
+                  self._tol, self._max_iter, self._fm, self._job_id, trial_idx),
             daemon=True,
         )
         try:
             self._process.start()
+            logger.info("[%s] MultiTrial child pid=%s started for trial=%s", self._job_id, self._process.pid, trial_idx + 1)
         except Exception:
+            logger.exception("[%s] MultiTrial child start failed for trial=%s", self._job_id, trial_idx + 1)
             parent_conn.close()
             return self._generate_inprocess_trial(trial_idx)
 
+        start_time = time.monotonic()
+        timeout_seconds = max(120.0, float(self._max_iter) * 2.0)
+
         while self._process.is_alive() or parent_conn.poll():
             if self.is_cancelled:
+                logger.warning("[%s] MultiTrial cancelled at trial=%s pid=%s", self._job_id, trial_idx + 1, self._process.pid)
                 self._process.terminate()
                 raise InterruptedError("用户取消")
+
+            elapsed = time.monotonic() - start_time
+            if elapsed > timeout_seconds:
+                logger.warning("[%s] MultiTrial timeout trial=%s elapsed=%.2fs, switching to in-process", self._job_id, trial_idx + 1, elapsed)
+                self._process.terminate()
+                self._process.join(timeout=1.0)
+                parent_conn.close()
+                self.signals.progress.emit(
+                    99,
+                    f"Trial {trial_idx+1} 子进程超时 ({timeout_seconds:.0f}s)，切换兼容模式继续计算..."
+                )
+                return self._generate_inprocess_trial(trial_idx)
+
             if parent_conn.poll(timeout=0.1):
                 msg = parent_conn.recv()
+                logger.info("[%s] MultiTrial trial=%s received message type=%s", self._job_id, trial_idx + 1, msg[0])
                 if msg[0] == 'progress':
                     _, iteration, max_err, mean_err = msg
                     base = int(trial_idx / self._n_trials * 100)
@@ -280,17 +374,21 @@ class MultiTrialGeneratorWorker(BaseWorker):
                     _, acc, dt, name = msg
                     result = EQSignal(np.asarray(acc), dt, name=name)
                     result.a2vd()
+                    logger.info("[%s] MultiTrial trial=%s done name=%s len=%s", self._job_id, trial_idx + 1, name, len(acc))
                     parent_conn.close()
                     return result
                 elif msg[0] == 'error':
+                    logger.error("[%s] MultiTrial trial=%s child error: %s", self._job_id, trial_idx + 1, msg[1])
                     parent_conn.close()
                     raise RuntimeError(msg[1])
 
+        logger.warning("[%s] MultiTrial trial=%s child exited without done message, using in-process fallback", self._job_id, trial_idx + 1)
         parent_conn.close()
         return self._generate_inprocess_trial(trial_idx)
 
     def _generate_inprocess_trial(self, trial_idx):
         from seiswave.core import WaveGenerator
+        logger.info("[%s] MultiTrial fallback to in-process for trial=%s", self._job_id, trial_idx + 1)
 
         def progress_cb(iteration, max_err, mean_err):
             if self.is_cancelled:
@@ -304,18 +402,23 @@ class MultiTrialGeneratorWorker(BaseWorker):
                     f"均值误差 {mean_err:.4f}")
             self.signals.progress.emit(pct, text)
 
-        return WaveGenerator.generate(
+        result = WaveGenerator.generate(
             self._target, self._periods,
             n=self._n, dt=self._dt, zeta=self._zeta,
             pga=self._pga, tol=self._tol, max_iter=self._max_iter,
             progress_callback=progress_cb,
+            n_trials=1,
         )
+        logger.info("[%s] MultiTrial in-process trial=%s done name=%s len=%s", self._job_id, trial_idx + 1, result.name, len(result.acc))
+        return result
 
     def execute(self):
         from seiswave.core import WaveGenerator, Spectra
 
         all_results = []
         errors = []
+        logger.info("[%s] MultiTrial execute start trials=%s algo=%s n=%s dt=%.5f periods=%s pga=%.4f tol=%.4f max_iter=%s",
+                    self._job_id, self._n_trials, _algo_name(self._fm), self._n, self._dt, len(self._periods), self._pga, self._tol, self._max_iter)
 
         for t in range(self._n_trials):
             if self.is_cancelled:
@@ -326,8 +429,11 @@ class MultiTrialGeneratorWorker(BaseWorker):
                                    self._periods, self._zeta)
             fit = WaveGenerator.fit_error(spec.sa, self._target)
             errors.append(fit['mean_error'])
+            logger.info("[%s] MultiTrial trial=%s fit mean_error=%.6f max_error=%.6f",
+                        self._job_id, t + 1, fit.get('mean_error', float('nan')), fit.get('max_error', float('nan')))
 
         best_idx = int(np.argmin(errors))
+        logger.info("[%s] MultiTrial best trial=%s errors=%s", self._job_id, best_idx + 1, [round(x, 6) for x in errors])
         self.signals.progress.emit(100, f"完成: 最优 Trial {best_idx+1}")
         return {
             'best': all_results[best_idx],
@@ -367,6 +473,70 @@ class FileLoadWorker(BaseWorker):
             pct = int((i + 1) / total * 100)
             self.signals.progress.emit(pct, f"加载 {i+1}/{total}: {os.path.basename(f)}")
         return signals
+
+
+# ──────────── 特殊地震动生成 Worker ────────────
+
+class SpecialGroundMotionWorker(BaseWorker):
+    """特殊地震动生成 Worker（FF / NF / NFP）
+
+    在独立线程中调用 create_ground_motion()，避免阻塞 GUI。
+    由于底层仍可能走 Fortran 路径，Fortran GIL 问题通过
+    子进程方式在 GeneratorWorker 中解决；此处直接用线程
+    是因为 create_ground_motion 内部已封装了子进程隔离
+    （通过 WaveGenerator._generate_fortran 路径时，Fortran
+    调用在独立进程中执行，但当前架构下 create_ground_motion
+    走的是 Python 回退路径，线程安全）。
+    """
+
+    def __init__(self, gm_type, Mw, R, Vs30=760.0,
+                 fault_type="strike_slip", n=4096, dt=0.02,
+                 zeta=0.05, tol=0.05, max_iter=50, fm=0,
+                 parent=None, job_id=None):
+        super().__init__(parent, job_id=job_id)
+        self._gm_type = gm_type
+        self._Mw = Mw
+        self._R = R
+        self._Vs30 = Vs30
+        self._fault_type = fault_type
+        self._n = n
+        self._dt = dt
+        self._zeta = zeta
+        self._tol = tol
+        self._max_iter = max_iter
+        self._fm = fm
+
+    def execute(self):
+        from seiswave.core.generator import create_ground_motion
+        logger.info("[%s] SpecialGroundMotionWorker execute type=%s Mw=%.3f R=%.3f Vs30=%.1f fault=%s algo=%s n=%s dt=%.5f tol=%.4f max_iter=%s",
+                    self._job_id, self._gm_type, self._Mw, self._R, self._Vs30,
+                    self._fault_type, _algo_name(self._fm), self._n, self._dt,
+                    self._tol, self._max_iter)
+
+        def progress_cb(iteration, max_err, mean_err):
+            if self.is_cancelled:
+                raise InterruptedError("用户取消")
+            pct = int(min(iteration / self._max_iter, 1.0) * 100)
+            text = (f"迭代 {iteration}/{self._max_iter}: "
+                    f"最大误差 {max_err:.4f}, 平均误差 {mean_err:.4f}")
+            self.signals.progress.emit(pct, text)
+
+        result = create_ground_motion(
+            type=self._gm_type,
+            Mw=self._Mw,
+            R=self._R,
+            Vs30=self._Vs30,
+            fault_type=self._fault_type,
+            n=self._n,
+            dt=self._dt,
+            zeta=self._zeta,
+            tol=self._tol,
+            max_iter=self._max_iter,
+            fm=self._fm,
+            progress_callback=progress_cb,
+        )
+        logger.info("[%s] SpecialGroundMotionWorker done name=%s len=%s", self._job_id, result.name, len(result.acc))
+        return result
 
 
 # ──────────── PEER 数据库相关 Workers ────────────
