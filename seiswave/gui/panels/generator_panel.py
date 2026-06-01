@@ -209,7 +209,15 @@ class GeneratorPanel(QWidget):
                     result, label, self._code_periods, self._code_sa)
                 best = result
                 pga = float(np.max(np.abs(best.acc))) if hasattr(best, 'acc') else 0
-                logger.info("[panel] result metrics PGA=%.4f label=%s", pga, label)
+                # 对特殊地震动也计算并记录误差指标
+                err_info = ""
+                if hasattr(best, 'total_spectrum') and hasattr(best, 'spectrum_periods') and best.total_spectrum is not None:
+                    from seiswave.core.spectrum import Spectra
+                    from seiswave.core.generator import WaveGenerator
+                    spec = Spectra.compute(best.acc, best.dt, best.spectrum_periods, 0.05, method='mixed')
+                    fit = WaveGenerator.fit_error(spec.sa, best.total_spectrum)
+                    err_info = f" mean_err={fit['mean_error']*100:.2f}% max_err={fit['max_error']*100:.2f}%"
+                logger.info("[panel] result metrics PGA=%.4f label=%s%s", pga, label, err_info)
 
             self._progress.finish(info_lines, progress_text)
             self._bottom_bar.set_progress_text(progress_text)

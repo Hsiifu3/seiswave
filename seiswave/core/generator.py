@@ -52,7 +52,7 @@ class WaveGenerator:
     def generate(target_spectrum: Optional[np.ndarray] = None,
                  periods: Optional[np.ndarray] = None,
                  n: int = 4096, dt: float = 0.02, zeta: float = 0.05,
-                 pga: float = 1.0, tol: float = 0.05, max_iter: int = 50,
+                 pga: float = 1.0, tol: float = 0.05, max_iter: int = 1,
                  fm: Optional[int] = None,
                  progress_callback: Optional[Callable] = None,
                  n_trials: int = 3,
@@ -68,6 +68,7 @@ class WaveGenerator:
         - 新调用：`generate(type="FF"|"NF"|"NFP", Mw=..., R=..., ...)`
         """
         from .fortran_bridge import HAS_FORTRAN
+        envelope_values = kwargs.pop("envelope_values", None)
 
         if type is not None:
             dispatch_fm = 0 if fm is None else fm
@@ -116,7 +117,7 @@ class WaveGenerator:
         return WaveGenerator._generate_python(
             ctrl_periods, ctrl_target, nP_orig, n, dt, zeta, peak0,
             tol, max_iter, general_fm, progress_callback,
-            n_trials=n_trials)
+            n_trials=n_trials, envelope_values=envelope_values)
 
     @staticmethod
     def _generate_fortran(ctrl_periods, ctrl_target, nP_orig, n, dt, zeta,
@@ -181,7 +182,7 @@ class WaveGenerator:
     @staticmethod
     def _generate_python(ctrl_periods, ctrl_target, nP_orig, n, dt, zeta,
                          peak0, tol, max_iter, fm, progress_callback,
-                         n_trials=3):
+                         n_trials=3, envelope_values=None):
         """Python 回退生成路径。"""
         from .signal import EQSignal as EQSig
 
@@ -230,6 +231,9 @@ class WaveGenerator:
         # 预判断 Fortran 可用性（仅时域法需要）
         # 当前实验：fm=1 强制走 Python 路径，验证两阶段增压策略
         use_fortran_adjust = False
+        base_envelope = WaveGenerator._resolve_envelope(
+            n, dt, envelope_values=envelope_values
+        )
 
         for trial in range(n_trials):
             # 初始信号：从目标谱估计功率谱（复现 initArtWave）
@@ -254,8 +258,7 @@ class WaveGenerator:
                                                 nP_ext, seed=trial * 37 + 13)
 
             # 包络调制
-            envelope = WaveGenerator._envelope(n, dt)
-            acc *= envelope
+            acc *= base_envelope
 
             # fm=0 保持原有预缩放逻辑；fm=1 交给后续两阶段增压处理
             if fm == 0:
@@ -1158,6 +1161,19 @@ class WaveGenerator:
         return env
 
     @staticmethod
+    def _resolve_envelope(n, dt, envelope_values=None):
+        """返回生成器应使用的包络数组。"""
+        if envelope_values is None:
+            return WaveGenerator._envelope(n, dt)
+
+        env = np.asarray(envelope_values, dtype=np.float64)
+        if env.ndim != 1 or len(env) != n:
+            raise ValueError(
+                f"envelope_values 长度应为 {n}，得到 {env.shape}"
+            )
+        return env.copy()
+
+    @staticmethod
     def fit_error(actual, target):
         """计算拟合误差，跳过首尾与近零目标点。"""
         actual = np.asarray(actual, dtype=np.float64)
@@ -1181,7 +1197,7 @@ class WaveGenerator:
 
 
 def create_ground_motion(type, Mw, R, Vs30=760.0, fault_type="strike_slip",
-                         n=4096, dt=0.02, zeta=0.05, tol=0.05, max_iter=80,
+                         n=4096, dt=0.02, zeta=0.05, tol=0.05, max_iter=1,
                          **kwargs):
     """便捷工厂函数：按类型创建特殊地震动。"""
     from .gmpe import GMPEAdapter, FaultType, MotionType
@@ -1261,10 +1277,11 @@ class FarFieldGenerator:
     def generate(cls,
                  Mw, R, Vs30=760, fault_type="strike_slip",
                  n=None, dt=None, zeta=None,
-                 tol=0.05, max_iter=80, fm=1,
+                 tol=0.05, max_iter=1, fm=1,
                  progress_callback=None,
                  **kwargs):
         from .gmpe import GMPEAdapter, MotionType
+        from .envelope_presets import get_envelope
         n = n or 4096
         dt = dt or 0.02
         zeta = zeta or 0.05
@@ -1276,11 +1293,13 @@ class FarFieldGenerator:
         )
 
         pga = _estimate_pga_from_spectrum(target_sa)
+        envelope_values = get_envelope("FF").envelope_at(n, dt)
         sig = WaveGenerator.generate(
             target_spectrum=target_sa, periods=periods,
             n=n, dt=dt, zeta=zeta, pga=pga,
             tol=tol, max_iter=max_iter, fm=fm,
             progress_callback=progress_callback,
+            envelope_values=envelope_values,
         )
         sig.name = f"FF_M{Mw:.1f}_R{R:.1f}"
         return _attach_spectrum_meta(sig, target_sa, periods)
@@ -1295,10 +1314,11 @@ class NearFieldNoPulseGenerator:
     def generate(cls,
                  Mw, R, Vs30=760, fault_type="strike_slip",
                  n=None, dt=None, zeta=None,
-                 tol=0.05, max_iter=80, fm=1,
+                 tol=0.05, max_iter=1, fm=1,
                  progress_callback=None,
                  **kwargs):
         from .gmpe import GMPEAdapter, MotionType
+        from .envelope_presets import get_envelope
         n = n or 4096
         dt = dt or 0.01
         zeta = zeta or 0.05
@@ -1310,11 +1330,13 @@ class NearFieldNoPulseGenerator:
         )
 
         pga = _estimate_pga_from_spectrum(target_sa)
+        envelope_values = get_envelope("NF").envelope_at(n, dt)
         sig = WaveGenerator.generate(
             target_spectrum=target_sa, periods=periods,
             n=n, dt=dt, zeta=zeta, pga=pga,
             tol=tol, max_iter=max_iter, fm=fm,
             progress_callback=progress_callback,
+            envelope_values=envelope_values,
         )
         sig.name = f"NF_M{Mw:.1f}_R{R:.1f}"
         return _attach_spectrum_meta(sig, target_sa, periods)
@@ -1336,7 +1358,7 @@ class NearFieldPulseGenerator:
     def generate(cls,
                  Mw, R, Vs30=760, fault_type="strike_slip",
                  n=None, dt=None, zeta=None,
-                 tol=0.05, max_iter=80, fm=0,
+                 tol=0.05, max_iter=1, fm=0,
                  progress_callback=None,
                  phi=None, t_total=None,
                  Tp_override=None, A_override=None,
@@ -1344,8 +1366,10 @@ class NearFieldPulseGenerator:
                  **kwargs):
         from .gmpe import GMPEAdapter, MotionType
         from .pulse import PulseCalculator, PulseWavelet, BakerPulseDetector
+        from .residual import ResidualSpectrum
         from .signal import EQSignal as EQSig
         from .spectrum import Spectra
+        from .envelope_presets import get_envelope
 
         n = n or 4096
         dt = dt or 0.01
@@ -1382,17 +1406,35 @@ class NearFieldPulseGenerator:
         pulse_vel_cm, pulse_acc_cm = PulseWavelet.generate(pulse_params, dt, n)
         # cm/s² → g
         pulse_acc_g = pulse_acc_cm / 980.0
+        envelope_values = get_envelope("NFP").envelope_at(n, dt)
 
-        # ── 3) 搜索最优缩放因子 + 小幅频域校正 ──
-        sf_candidates = [0.2, 0.3, 0.5, 0.7, 1.0, 1.3, 1.5]
+        # ── 3) 用残余谱分解搜索最优脉冲缩放因子，并对总波小幅频域校正 ──
+        sf_candidates = [0.2, 0.3, 0.5, 0.7, 1.0]
 
         best_sig = None
-        best_error = float("inf")
+        best_rank = None
         best_sf = 1.0
         best_metrics = None
+        best_residual_result = None
+        best_residual_acc = None
 
         for sf in sf_candidates:
-            combined_acc = base_signal.acc + sf * pulse_acc_g
+            residual_acc, residual_result = ResidualSpectrum.generate(
+                total_sa=total_sa,
+                pulse_acc=pulse_acc_g * sf,
+                dt=dt,
+                periods=periods,
+                zeta=zeta,
+                n=n,
+                tol=tol,
+                max_iter=max_iter,
+                fm=fm,
+                correct_combined=False,
+                envelope_values=envelope_values,
+            )
+            combined_acc = ResidualSpectrum.combine(
+                residual_result.scaled_pulse_acc, residual_acc
+            )
             corrected_acc = cls._small_freq_correct(
                 combined_acc, dt, total_sa, periods
             )
@@ -1400,7 +1442,7 @@ class NearFieldPulseGenerator:
             sig = EQSig(corrected_acc, dt, name="artificial")
             sig.a2vd()
 
-            # Baker 检测（速度转为 cm/s）
+            # EQSignal.acc 以 g 为单位时，积分后的速度需乘以 980 转为 cm/s。
             vel_cm_s = sig.vel * 980.0
             metrics = BakerPulseDetector.analyze(vel_cm_s, dt)
 
@@ -1408,54 +1450,61 @@ class NearFieldPulseGenerator:
                 sig.acc, sig.dt, periods, zeta=0.05, method="mixed"
             ).sa
             fit = WaveGenerator.fit_error(gen_sa, total_sa)
+            pulse_period = metrics.get("pulse_period", 0.0)
+            if pulse_period > 0:
+                period_misfit = abs(np.log(pulse_period / pulse_params.Tp))
+            else:
+                period_misfit = float("inf")
 
-            if metrics["has_pulse"] and metrics["confidence"] >= 0.85:
-                if fit["mean_error"] < best_error:
-                    best_error = fit["mean_error"]
-                    best_sig = sig
-                    best_sf = sf
-                    best_metrics = metrics
+            required_ok = (
+                metrics["has_pulse"]
+                and metrics["confidence"] >= 0.85
+                and not residual_result.residual_has_pulse
+            )
+            pgv_gap = abs(max(100.0 - metrics["pulse_amplitude"], 0.0))
 
-        # 若没有任何候选满足 Baker 门槛，退而求其次：选 confidence 最高的
-        if best_sig is None:
-            best_score = -float("inf")
-            for sf in sf_candidates:
-                combined_acc = base_signal.acc + sf * pulse_acc_g
-                corrected_acc = cls._small_freq_correct(
-                    combined_acc, dt, total_sa, periods
-                )
-                sig = EQSig(corrected_acc, dt, name="artificial")
-                sig.a2vd()
+            if required_ok and metrics["pulse_amplitude"] >= 100.0:
+                rank = (0, fit["mean_error"], period_misfit)
+            elif required_ok:
+                rank = (1, pgv_gap, fit["mean_error"], period_misfit)
+            else:
+                rank = (2, -metrics["confidence"], fit["mean_error"], period_misfit)
 
-                vel_cm_s = sig.vel * 980.0
-                metrics = BakerPulseDetector.analyze(vel_cm_s, dt)
-
-                gen_sa = Spectra.compute(
-                    sig.acc, sig.dt, periods, zeta=0.05, method="mixed"
-                ).sa
-                fit = WaveGenerator.fit_error(gen_sa, total_sa)
-
-                # 评分：confidence 为主，mean_error 为辅
-                score = metrics["confidence"] * 10.0 - fit["mean_error"]
-                if score > best_score:
-                    best_score = score
-                    best_sig = sig
-                    best_sf = sf
-                    best_metrics = metrics
+            if best_rank is None or rank < best_rank:
+                best_rank = rank
+                best_sig = sig
+                best_sf = sf
+                best_metrics = metrics
+                best_residual_result = residual_result
+                best_residual_acc = residual_acc.copy()
 
         # ── 4) 附加元数据（保留旧版接口）──
+        if best_sig is None or best_metrics is None or best_residual_result is None:
+            raise RuntimeError("NFP 候选搜索失败")
+
+        pulse_acc = np.asarray(best_residual_result.scaled_pulse_acc, dtype=np.float64)
+        residual_acc = best_sig.acc - pulse_acc
+        residual_sig = EQSig(residual_acc, dt, name="residual")
+        residual_sig.a2vd()
+        residual_metrics = BakerPulseDetector.analyze(residual_sig.vel * 980.0, dt)
+        pulse_scale = float(best_sf * best_residual_result.scaling_factor)
+
         best_sig.name = f"NFP_M{Mw:.1f}_R{R:.1f}"
         best_sig.pulse_params = pulse_params
         best_sig.pulse_metrics = best_metrics
-        best_sig.pulse_acc = pulse_acc_g * best_sf          # g
-        best_sig.pulse_vel = pulse_vel_cm * best_sf / 100.0  # m/s (EQSignal 常规单位)
-        best_sig.residual_acc = base_signal.acc.copy()
+        best_sig.pulse_acc = pulse_acc
+        best_sig.pulse_vel = pulse_vel_cm * pulse_scale / 100.0
+        best_sig.residual_acc = residual_acc
+        best_sig.residual_has_pulse = residual_metrics["has_pulse"]
+        best_sig.residual_pulse_metrics = residual_metrics
 
-        # 残余谱：基础信号的反应谱
         residual_sa = Spectra.compute(
-            base_signal.acc, dt, periods, zeta=0.05, method="mixed"
+            residual_acc, dt, periods, zeta=0.05, method="mixed"
         ).sa
         best_sig.residual_spectrum = residual_sa
+        best_sig.residual_target_spectrum = np.asarray(
+            best_residual_result.residual_spectrum, dtype=np.float64
+        )
 
         # 脉冲谱
         pulse_sa = Spectra.compute(
@@ -1465,7 +1514,7 @@ class NearFieldPulseGenerator:
 
         best_sig.total_spectrum = np.asarray(total_sa, dtype=np.float64)
         best_sig.spectrum_periods = np.asarray(periods, dtype=np.float64)
-        best_sig.scaling_factor = best_sf
+        best_sig.scaling_factor = pulse_scale
         return best_sig
 
     @staticmethod

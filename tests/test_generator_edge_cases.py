@@ -273,7 +273,7 @@ def test_nfp_invalid_fault_type(monkeypatch):
     )
     monkeypatch.setattr(
         "seiswave.core.pulse.BakerPulseDetector.analyze",
-        lambda vel, dt: {"has_pulse": True, "confidence": 0.9, "pulse_period": 1.0, "energy_ratio": 0.5}
+        lambda vel, dt: {"has_pulse": True, "confidence": 0.9, "pulse_period": 1.0, "energy_ratio": 0.5, "pulse_amplitude": 100.0, "pgv_ratio": 0.8}
     )
     monkeypatch.setattr(
         "seiswave.core.spectrum.Spectra.compute",
@@ -316,7 +316,7 @@ def test_nfp_best_sig_none_fallback(monkeypatch):
     # Baker 始终返回不满足条件的结果
     monkeypatch.setattr(
         "seiswave.core.pulse.BakerPulseDetector.analyze",
-        lambda vel, dt: {"has_pulse": False, "confidence": 0.0, "pulse_period": 0.0, "energy_ratio": 0.0}
+        lambda vel, dt: {"has_pulse": False, "confidence": 0.0, "pulse_period": 0.0, "energy_ratio": 0.0, "pulse_amplitude": 0.0, "pgv_ratio": 0.0}
     )
     monkeypatch.setattr(
         "seiswave.core.spectrum.Spectra.compute",
