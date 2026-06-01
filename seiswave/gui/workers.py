@@ -524,6 +524,8 @@ class SpecialGroundMotionWorker(BaseWorker):
             text = (f"迭代 {iteration}/{self._max_iter}: "
                     f"最大误差 {max_err:.4f}, 平均误差 {mean_err:.4f}")
             self.signals.progress.emit(pct, text)
+            logger.info("[%s] SpecialGroundMotionWorker progress iter=%s max_err=%.6f mean_err=%.6f",
+                        self._job_id, iteration, max_err, mean_err)
 
         result = create_ground_motion(
             type=self._gm_type,

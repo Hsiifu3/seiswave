@@ -300,6 +300,7 @@ class ResidualSpectrum:
         correct_combined: bool = True,
         combined_tol: float = 0.05,
         max_correction_iter: int = 5,
+        envelope_values: Optional[np.ndarray] = None,
     ) -> Tuple[np.ndarray, ResidualResult]:
         """
         生成残余加速度时程。
@@ -385,6 +386,7 @@ class ResidualSpectrum:
                 tol=tol,
                 max_iter=max_iter,
                 fm=fm,
+                envelope_values=envelope_values,
             )
             residual_acc = np.asarray(residual_signal.acc, dtype=np.float64)
 

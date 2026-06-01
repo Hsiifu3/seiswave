@@ -75,8 +75,19 @@ class GeneratorController(QObject):
                             float(np.max(np.abs(best.acc))) if hasattr(best, 'acc') else 0,
                             result.get('n_trials', 1), err_info)
             else:
-                logger.info("[%s] Controller finished label=%s result_type=%s",
-                            self._job_id, label, type(result).__name__)
+                # 特殊地震动（EQSignal）或单结果
+                pga = 0.0
+                err_info = ""
+                if hasattr(result, 'acc'):
+                    pga = float(np.max(np.abs(result.acc)))
+                if hasattr(result, 'total_spectrum') and hasattr(result, 'spectrum_periods') and result.total_spectrum is not None:
+                    from seiswave.core.generator import WaveGenerator
+                    from seiswave.core.spectrum import Spectra
+                    spec = Spectra.compute(result.acc, result.dt, result.spectrum_periods, 0.05, method='mixed')
+                    fit = WaveGenerator.fit_error(spec.sa, result.total_spectrum)
+                    err_info = f" mean_err={fit['mean_error']*100:.2f}% max_err={fit['max_error']*100:.2f}%"
+                logger.info("[%s] Controller finished label=%s PGA=%.4f result_type=%s%s",
+                            self._job_id, label, pga, type(result).__name__, err_info)
         except Exception:
             pass
         return None
