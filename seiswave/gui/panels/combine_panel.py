@@ -54,20 +54,9 @@ class CombinePanel(QWidget):
         self._mode_combo.addItems(["7 条模式 (5天然+2人工)", "3 条模式"])
         mode_form.addRow("模式:", self._mode_combo)
         left_layout.addWidget(mode_group)
-        # 波形汇总表
+        # 波形汇总（仅数量统计；详细列表见下方「汇总」面板，避免重复表格）
         table_group = QGroupBox("波形汇总")
         table_layout = QVBoxLayout(table_group)
-        self._table = QTableWidget()
-        self._table.setColumnCount(5)
-        self._table.setHorizontalHeaderLabels(
-            ["序号", "名称", "来源", "PGA(g)", "持时(s)"])
-        self._table.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.Stretch)
-        self._table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self._table.setSelectionBehavior(QTableWidget.SelectRows)
-        self._table.setAlternatingRowColors(True)
-        table_layout.addWidget(self._table)
-
         self._count_label = QLabel("天然波: 0  人工波: 0  合计: 0")
         table_layout.addWidget(self._count_label)
         left_layout.addWidget(table_group)
@@ -152,35 +141,8 @@ class CombinePanel(QWidget):
     def _refresh_table(self):
         n_nat = len(self._results)
         n_art = len(self._generated_waves)
-        total = n_nat + n_art
-        self._table.setRowCount(total)
-
-        row = 0
-        for i, r in enumerate(self._results):
-            rec = r.record
-            pga = f"{float(np.max(np.abs(rec.sa))) * r.scale_factor:.4f}" if rec.sa is not None else "-"
-            self._table.setItem(row, 0, QTableWidgetItem(str(row + 1)))
-            self._table.setItem(row, 1, QTableWidgetItem(
-                f"RSN{rec.rsn} {rec.event[:20]}"))
-            self._table.setItem(row, 2, QTableWidgetItem("天然波"))
-            self._table.setItem(row, 3, QTableWidgetItem(
-                f"{r.scale_factor:.3f}"))
-            self._table.setItem(row, 4, QTableWidgetItem("-"))
-            row += 1
-
-        for i, sig in enumerate(self._generated_waves):
-            pga = float(np.max(np.abs(sig.acc)))
-            dur = sig.n * sig.dt
-            self._table.setItem(row, 0, QTableWidgetItem(str(row + 1)))
-            self._table.setItem(row, 1, QTableWidgetItem(
-                sig.name or f"人工波_{i+1}"))
-            self._table.setItem(row, 2, QTableWidgetItem("人工波"))
-            self._table.setItem(row, 3, QTableWidgetItem(f"{pga:.4f}"))
-            self._table.setItem(row, 4, QTableWidgetItem(f"{dur:.1f}"))
-            row += 1
-
         self._count_label.setText(
-            f"天然波: {n_nat}  人工波: {n_art}  合计: {total}")
+            f"天然波: {n_nat}  人工波: {n_art}  合计: {n_nat + n_art}")
     # ──────────── 谱对比图 ────────────
 
     def _refresh_plot(self):

@@ -257,10 +257,17 @@ class TestCombinePanel:
         panel.set_results([result], database="db")
         panel.add_generated_wave(_make_sig("art1"))
 
-        assert panel._table.rowCount() == 2
+    def test_refresh_table_counts_natural_and_artificial(self, qapp):
+        from seiswave.gui.panels.combine_panel import CombinePanel
+
+        panel = CombinePanel()
+        result = SelectionResult(record=_make_record(1), scale_factor=1.2, match_error=0.05, deviations={1.0: 0.1})
+        panel.set_results([result], database="db")
+        panel.add_generated_wave(_make_sig("art1"))
+
+        # 简表已移除（详细列表见汇总面板），仅保留数量统计标签
         assert panel._count_label.text() == "天然波: 1  人工波: 1  合计: 2"
-        assert panel._table.item(0, 2).text() == "天然波"
-        assert panel._table.item(1, 2).text() == "人工波"
+        assert not hasattr(panel, "_table")
 
     def test_do_validate_warns_without_target_or_waves(self, qapp, monkeypatch):
         from seiswave.gui.panels.combine_panel import CombinePanel
