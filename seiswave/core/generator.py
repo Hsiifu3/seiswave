@@ -52,7 +52,7 @@ class WaveGenerator:
     def generate(target_spectrum: Optional[np.ndarray] = None,
                  periods: Optional[np.ndarray] = None,
                  n: int = 4096, dt: float = 0.02, zeta: float = 0.05,
-                 pga: float = 1.0, tol: float = 0.05, max_iter: int = 1,
+                 pga: float = 1.0, tol: float = 0.05, max_iter: int = 20,
                  fm: Optional[int] = None,
                  progress_callback: Optional[Callable] = None,
                  n_trials: int = 3,
@@ -61,6 +61,8 @@ class WaveGenerator:
                  R: Optional[float] = None,
                  Vs30: float = 760.0,
                  fault_type: str = "strike_slip",
+                 use_atik: bool = True,
+                 use_staged_peak: bool = False,
                  **kwargs):
         """统一入口：通用谱匹配 or 特殊地震动类型分发。
 
@@ -117,7 +119,8 @@ class WaveGenerator:
         return WaveGenerator._generate_python(
             ctrl_periods, ctrl_target, nP_orig, n, dt, zeta, peak0,
             tol, max_iter, general_fm, progress_callback,
-            n_trials=n_trials, envelope_values=envelope_values)
+            n_trials=n_trials, envelope_values=envelope_values,
+            use_atik=use_atik, use_staged_peak=use_staged_peak)
 
     @staticmethod
     def _generate_fortran(ctrl_periods, ctrl_target, nP_orig, n, dt, zeta,
@@ -182,7 +185,8 @@ class WaveGenerator:
     @staticmethod
     def _generate_python(ctrl_periods, ctrl_target, nP_orig, n, dt, zeta,
                          peak0, tol, max_iter, fm, progress_callback,
-                         n_trials=3, envelope_values=None):
+                         n_trials=3, envelope_values=None, use_atik=True,
+                         use_staged_peak=False):
         """Python 回退生成路径。"""
         from .signal import EQSignal as EQSig
 
@@ -210,7 +214,21 @@ class WaveGenerator:
             nP_ctrl = nP
         else:
             # ── 时域法：内部控制点可降采样，最终误差仍用完整谱验算 ──
-            if nP_orig > 50:
+            if use_atik:
+                # Atik 算法：仅用可表示控制点(T>=2*dt，即频率<=Nyquist)。
+                # 超 Nyquist 周期(T<2*dt)在该 dt 下物理上无法匹配，纳入目标只会污染
+                # 最小二乘修正方向、拖慢收敛(实测仅可表示255点 iter5→1.8% vs 全300点 4.0%)。
+                repr_mask = ctrl_periods >= 2.0 * dt
+                if (not np.all(repr_mask)) and int(np.count_nonzero(repr_mask)) >= 2:
+                    P_ctrl = np.ascontiguousarray(ctrl_periods[repr_mask], dtype=np.float64)
+                    SPAT_ctrl = np.ascontiguousarray(ctrl_target[repr_mask], dtype=np.float64)
+                    logger.info("控制点剔除超 Nyquist (T<%.3fs): %d → %d",
+                                2.0 * dt, nP_orig, len(P_ctrl))
+                else:
+                    P_ctrl = np.asarray(ctrl_periods, dtype=np.float64).copy()
+                    SPAT_ctrl = np.asarray(ctrl_target, dtype=np.float64).copy()
+                nP_ctrl = len(P_ctrl)
+            elif nP_orig > 50:
                 P_ctrl, SPAT_ctrl = WaveGenerator._downsample_control_points(
                     ctrl_periods, ctrl_target, max_ctrl=50
                 )
@@ -296,22 +314,40 @@ class WaveGenerator:
                 else:
                     # 阶段1：低PGA下修形
                     peak_low = float(np.max(np.abs(acc)))
-                    acc, _ = WaveGenerator._adjustspectra(
-                        acc, n, dt, zeta, P_ctrl, nP_ctrl, SPAT_ctrl, tol, max_iter,
-                        progress_callback
-                    )
+                    if use_atik:
+                        acc, _ = WaveGenerator._adjustspectra_atik(
+                            acc, n, dt, zeta, P_ctrl, nP_ctrl, SPAT_ctrl, tol, max_iter,
+                            progress_callback
+                        )
+                    else:
+                        acc, _ = WaveGenerator._adjustspectra(
+                            acc, n, dt, zeta, P_ctrl, nP_ctrl, SPAT_ctrl, tol, max_iter,
+                            progress_callback
+                        )
                     
-                    # 阶段2：逐步增压到目标PGA
-                    if peak_low < peak0 * 0.95:
+                    # 阶段2（可选/实验）：仅在 use_staged_peak 下做分阶段全局缩放+每步重拟合。
+                    # 默认不再强行增压到 target PGA —— 谱匹配迭代修复后 PGA 由短周期谱纵标
+                    # 自然决定；旧的"单点硬裁剪逐步增压"会被重拟合抹平、对 PGA 无实效且浪费
+                    # 迭代（实测仍停在物理 PGA），故移除。
+                    if use_staged_peak and peak_low < peak0 * 0.95:
+                        # 实验性：分阶段全局线性缩放 + 每步谱匹配
+                        def _stage_adjust(acc_stage):
+                            if use_atik:
+                                acc_stage, _ = WaveGenerator._adjustspectra_atik(
+                                    acc_stage, n, dt, zeta, P_ctrl, nP_ctrl, SPAT_ctrl,
+                                    tol, max(5, max_iter // 3), None
+                                )
+                            else:
+                                acc_stage, _ = WaveGenerator._adjustspectra(
+                                    acc_stage, n, dt, zeta, P_ctrl, nP_ctrl, SPAT_ctrl,
+                                    tol, max(5, max_iter // 3), None
+                                )
+                            return acc_stage
                         n_steps = max(2, min(5, int((peak0 - peak_low) / 0.02) + 1))
-                        step_peaks = np.linspace(peak_low, peak0, n_steps)
-                        for step_peak in step_peaks[1:]:
-                            acc = WaveGenerator._adjust_peak(acc, step_peak)
-                            acc, _ = WaveGenerator._adjustspectra(
-                                acc, n, dt, zeta, P_ctrl, nP_ctrl, SPAT_ctrl, tol, max(5, max_iter // 3),
-                                None
-                            )
-                    
+                        acc = WaveGenerator._adjust_peak_staged(
+                            acc, peak0, stages=n_steps, adjust_fn=_stage_adjust
+                        )
+
                     # 计算最终误差
                     from .spectrum import Spectra
                     spec = Spectra.compute(acc, dt, ctrl_periods, zeta, method="mixed")
@@ -476,8 +512,12 @@ class WaveGenerator:
         # 构造频域信号
         rng = np.random.default_rng(seed=seed)
         af = np.zeros(nfft, dtype=complex)
+        # NOTE: plateau enhancement 曾被移除（理由：在迭代发散的旧匹配器下，初始波形
+        # 质量决定结果，过度抬高短中周期会拖累 envelope-only mean）。谱匹配迭代修复后
+        # （带符号 dR + line-search），谱形由匹配器收敛保证，保留 plateau 反而同时改善
+        # FF mean(2.0%→1.8%) 并让 NFP 脉冲周期 max 回到 0.176-0.181，故撤销移除。
+        # 实测见 tests/probe_plateau_tradeoff.py。
         max_sptf = float(np.max(SPTf[IPf1:IPf2+1])) if IPf2 >= IPf1 else 0.0
-
         for k in range(IPf1, IPf2 + 1):
             phi = rng.uniform(0, TWO_PI)
             # Pf[k] = 1/f[k]，对应频率 f[k]（Fortran: Pf(k) -> f(k) -> af(k)）
@@ -491,12 +531,11 @@ class WaveGenerator:
             else:
                 Saw = (zeta / PI / wk) * SPTf[k]**2
 
-            # 对接近目标谱平台峰值的频带做温和平滑增强，
-            # 以部分抵消 Vanmarcke 公式中 1/wk 带来的系统性低频偏置。
+            # plateau enhancement: 对接近目标谱平台峰值的频带温和提升 PSD
+            # (撤销了会话前的移除, 见上方 NOTE; tests/probe_plateau_tradeoff.py)
             if max_sptf > 0.0:
                 plateau_ratio = SPTf[k] / max_sptf
-                plateau_weight = 1.0 + 0.4 / (1.0 + np.exp(-(plateau_ratio - 0.85) / 0.05))
-                Saw *= plateau_weight
+                Saw *= 1.0 + 0.4 / (1.0 + np.exp(-(plateau_ratio - 0.85) / 0.05))
 
             Saw = max(Saw, 0.0)
             if not np.isfinite(Saw):
@@ -736,6 +775,135 @@ class WaveGenerator:
         return best, minerr
 
     @staticmethod
+    def _adjustspectra_atik(acc, n, dt, zeta, P, nP, SPAT, tol, max_iter,
+                           progress_callback):
+        """时域小波叠加谱匹配算法（Atik & Abrahamson 2010 改进版，全自由度）
+
+        基于 _adjustspectra 的全 nP×nP 响应矩阵，核心改进：
+        - 小波：Gaussian → Tapered Cosine（零均值/零一阶矩）
+        - 矩阵：全自由度 nP×nP（非降采样 K 点），保留完整控制点耦合
+        - 求解：Levenberg-Marquardt 阻尼最小二乘，防止 dR 过大发散
+        - 控制：多层级收敛+发散检测，alpha clip 收紧到 ±1e3
+        """
+        TWO_PI = 2.0 * np.pi
+        peak0 = float(np.max(np.abs(acc)))
+        a = acc.copy()
+
+        SPA, SPI = WaveGenerator._spamixed(a, dt, zeta, P, nP)
+        aerror, merror = WaveGenerator._errora(np.abs(SPA), SPAT, nP)
+
+        if aerror <= tol and merror <= 3.0 * tol:
+            return a, aerror
+
+        minerr = aerror
+        best = a.copy()
+        iteration = 1
+        stall = 0
+
+        # 预计算频域常量
+        nfft_freq = WaveGenerator._nextpow2(n) * 2
+        nf = nfft_freq // 2 + 1
+        fs = 1.0 / dt
+        df_freq = fs / nfft_freq
+        wj = np.zeros(nf)
+        wj[1:] = TWO_PI * np.arange(1, nf) * df_freq
+        wj2 = wj * wj
+        w0_arr = TWO_PI / P
+
+        while iteration <= max_iter:
+            # ─── 收敛检查 ───
+            if aerror <= tol and merror <= 3.0 * tol:
+                break
+
+            # ─── 计算 dR（带符号相对残差，必须与带符号的 M 同约定）───
+            # 目标：带符号响应 SPA[i] → sign(SPA[i])·SPAT[i]（即 |SPA|→SPAT 但保持方向）。
+            # 归一化期望变化 = sign(SPA) - SPA/SPAT。对响应峰为负的周期（约半数），
+            # 这给出负 dR，驱动响应更负；若误用无符号 (SPAT-|SPA|)/SPAT，半数周期方向相反，
+            # 合成步永远上坡 → line-search 无法接受任何步长（见此前 trace）。
+            dR = np.sign(SPA) - SPA / np.maximum(SPAT, 1e-30)
+
+            # ─── 构造 nP 个改进 wavelet（峰值对齐到各周期当前响应峰时刻）───
+            W = np.zeros((n, nP), dtype=np.float64)
+            for i in range(nP):
+                W[:, i] = WaveGenerator._wfunc_atik(n, dt, SPI[i], P[i], zeta)
+
+            # ─── 计算 nP × nP 响应矩阵（全自由度）───
+            M = np.zeros((nP, nP), dtype=np.float64)
+
+            W_padded = np.zeros((nP, nfft_freq), dtype=np.float64)
+            W_padded[:, :n] = W.T
+            Wf = np.fft.rfft(W_padded, axis=1)
+
+            spi_idx = SPI - 1
+            for i in range(nP):
+                w0 = w0_arr[i]
+                w0i2 = w0 * w0
+                w0iwj = w0 * wj
+                denom = w0i2 - wj2 + 2.0j * zeta * w0iwj
+                safe = np.abs(denom) > 1e-30
+                H = np.ones(nf, dtype=complex)
+                H[safe] = (w0i2 + 2.0j * zeta * w0iwj[safe]) / denom[safe]
+
+                raf = Wf * H[np.newaxis, :]
+                ra_all = np.fft.irfft(raf, nfft_freq, axis=1)
+
+                # M[i, j] = 周期 i 振子在其当前响应峰值时刻 SPI[i] 处对 wavelet j 的响应
+                # （Al Atik-Abrahamson 2010 的耦合矩阵：每行单一时刻取值，保留符号）。
+                si = spi_idx[i]
+                if 0 <= si < n:
+                    M[i, :] = ra_all[:, si] / max(SPAT[i], 1e-30)
+                else:
+                    M[i, i] = 1.0
+
+            # Tikhonov 正则化求解 M·alpha = dR
+            alpha = WaveGenerator._solve_tikhonov(M, dR, lam=10.0)
+            alpha = np.nan_to_num(alpha, nan=0.0, posinf=0.0, neginf=0.0)
+            alpha = np.clip(alpha, -1e3, 1e3)
+
+            # ─── 完整步增量（不在循环内硬裁剪 PGA，避免破坏谱形）───
+            W_safe = np.nan_to_num(W, nan=0.0, posinf=0.0, neginf=0.0)
+            base_delta = W_safe @ alpha
+            base_delta = np.nan_to_num(base_delta, nan=0.0, posinf=0.0, neginf=0.0)
+            amax = float(np.max(np.abs(base_delta)))
+            if amax > 0.5 * peak0 and amax > 0:
+                base_delta *= (0.5 * peak0) / amax  # 单步幅值上限，防过冲
+
+            # ─── Backtracking line-search：误差不降就把步长减半，保证单调下降 ───
+            improved = False
+            s = 1.0
+            for _ls in range(8):
+                a_trial = a + s * base_delta
+                SPA_t, SPI_t = WaveGenerator._spamixed(a_trial, dt, zeta, P, nP)
+                ae_t, me_t = WaveGenerator._errora(np.abs(SPA_t), SPAT, nP)
+                if ae_t < aerror:
+                    a = a_trial
+                    SPA, SPI = SPA_t, SPI_t
+                    aerror, merror = ae_t, me_t
+                    improved = True
+                    break
+                s *= 0.5
+
+            if progress_callback:
+                progress_callback(iteration, merror, aerror)
+
+            if not improved:
+                # 当前 Jacobian 下已无法继续下降 → 收敛/停滞，退出
+                break
+
+            if aerror < minerr - 1e-9:
+                minerr = aerror
+                best = a.copy()
+                stall = 0
+            else:
+                stall += 1
+                if stall >= 3:
+                    break
+
+            iteration += 1
+
+        return best, minerr
+
+    @staticmethod
     def _adjustspectra(acc, n, dt, zeta, P, nP, SPAT, tol, max_iter,
                        progress_callback):
         """时域小波叠加谱匹配算法（复现 EQSignal adjustspectra）
@@ -759,6 +927,7 @@ class WaveGenerator:
         minerr = aerror
         best = a.copy()
         iteration = 1
+        stall = 0
 
         # 预计算频域法所需常量
         nfft_freq = WaveGenerator._nextpow2(n) * 2
@@ -768,31 +937,28 @@ class WaveGenerator:
         wj = np.zeros(nf)
         wj[1:] = TWO_PI * np.arange(1, nf) * df_freq
         wj2 = wj * wj
-
-        # 预计算各周期的自然频率
         w0_arr = TWO_PI / P
 
-        while (aerror > tol or merror > 3.0 * tol) and iteration <= max_iter:
-            # dR = SPA * (SPAT/|SPA| - 1) / SPAT
-            dR = SPA * (SPAT / np.maximum(np.abs(SPA), 1e-30) - 1.0) / \
-                 np.maximum(SPAT, 1e-30)
+        while iteration <= max_iter:
+            if aerror <= tol and merror <= 3.0 * tol:
+                break
+
+            # 带符号相对残差，与带符号 M 同约定（见 _adjustspectra_atik 注释）
+            dR = np.sign(SPA) - SPA / np.maximum(SPAT, 1e-30)
 
             # 构造小波函数 W (n x nP)
             W = np.zeros((n, nP))
             for i in range(nP):
                 W[:, i] = WaveGenerator._wfunc(n, dt, SPI[i], P[i], zeta)
 
-            # 构造响应矩阵 M (nP x nP) — 全频域批量 FFT 优化
-            # M 矩阵精度要求不高（最小二乘系数），全部用频域法
+            # 构造响应矩阵 M (nP x nP) — 全频域批量 FFT
             M = np.zeros((nP, nP))
-            spi_idx = SPI - 1  # 转为 0-based
+            spi_idx = SPI - 1  # 0-based 峰值时刻
 
-            # 批量 FFT 所有小波
             W_padded = np.zeros((nP, nfft_freq))
-            W_padded[:, :n] = W.T  # (nP, nfft_freq)
-            Wf = np.fft.rfft(W_padded, axis=1)  # (nP, nf)
+            W_padded[:, :n] = W.T
+            Wf = np.fft.rfft(W_padded, axis=1)
 
-            # 预计算传递函数比值 H[i] = numer / denom，形状 (nf,)
             for i in range(nP):
                 w0 = w0_arr[i]
                 w0i2 = w0 * w0
@@ -801,46 +967,56 @@ class WaveGenerator:
                 safe = np.abs(denom) > 1e-30
                 H = np.ones(nf, dtype=complex)
                 H[safe] = (w0i2 + 2.0j * zeta * w0iwj[safe]) / denom[safe]
-                # 应用传递函数到所有小波 (nP, nf)
                 raf = Wf * H[np.newaxis, :]
-                # 批量 IFFT
-                ra_all = np.fft.irfft(raf, nfft_freq, axis=1)  # (nP, nfft_freq)
+                ra_all = np.fft.irfft(raf, nfft_freq, axis=1)
+                # M[i, :] = 周期 i 振子在其响应峰值时刻 SPI[i] 处对各 wavelet 的响应
                 si = spi_idx[i]
                 if 0 <= si < n:
                     M[i, :] = ra_all[:, si] / max(SPAT[i], 1e-30)
+                else:
+                    M[i, i] = 1.0
 
-            # 非对角元素衰减（向量化）
-            diag_mask = np.eye(nP, dtype=bool)
-            M[~diag_mask] *= 0.618
+            # Tikhonov 正则化求解 M·alpha = dR
+            alpha = WaveGenerator._solve_tikhonov(M, dR, lam=10.0)
+            alpha = np.nan_to_num(alpha, nan=0.0, posinf=0.0, neginf=0.0)
+            alpha = np.clip(alpha, -1e3, 1e3)
 
-            # 最小二乘求解 M * dR_new = dR
-            # 回退到 numpy lstsq，因为 scipy gelsd 在此场景下效果不佳
-            dR_solved, _, _, _ = np.linalg.lstsq(M, dR, rcond=None)
-            # 清理数值异常，防止后续 matmul 溢出/NaN
-            dR_solved = np.nan_to_num(dR_solved, nan=0.0, posinf=0.0, neginf=0.0)
-            dR_solved = np.clip(dR_solved, -1e6, 1e6)
-
-            # 叠加小波（向量化）；清理坏数值，避免矩阵乘法放大异常
             W_safe = np.nan_to_num(W, nan=0.0, posinf=0.0, neginf=0.0)
-            with np.errstate(divide='ignore', over='ignore', invalid='ignore'):
-                delta_a = W_safe @ dR_solved
-            delta_a = np.nan_to_num(delta_a, nan=0.0, posinf=0.0, neginf=0.0)
-            a = np.nan_to_num(a, nan=0.0, posinf=0.0, neginf=0.0)
-            a += delta_a
+            base_delta = W_safe @ alpha
+            base_delta = np.nan_to_num(base_delta, nan=0.0, posinf=0.0, neginf=0.0)
+            amax = float(np.max(np.abs(base_delta)))
+            if amax > 0.5 * peak0 and amax > 0:
+                base_delta *= (0.5 * peak0) / amax
 
-            # adjustpeak
-            a = WaveGenerator._adjust_peak(a, peak0)
-
-            # 重新计算反应谱
-            SPA, SPI = WaveGenerator._spamixed(a, dt, zeta, P, nP)
-            aerror, merror = WaveGenerator._errora(np.abs(SPA), SPAT, nP)
+            # Backtracking line-search：误差不降则步长减半，保证单调下降
+            improved = False
+            s = 1.0
+            for _ls in range(8):
+                a_trial = a + s * base_delta
+                SPA_t, SPI_t = WaveGenerator._spamixed(a_trial, dt, zeta, P, nP)
+                ae_t, me_t = WaveGenerator._errora(np.abs(SPA_t), SPAT, nP)
+                if ae_t < aerror:
+                    a = a_trial
+                    SPA, SPI = SPA_t, SPI_t
+                    aerror, merror = ae_t, me_t
+                    improved = True
+                    break
+                s *= 0.5
 
             if progress_callback:
                 progress_callback(iteration, merror, aerror)
 
-            if aerror < minerr:
+            if not improved:
+                break
+
+            if aerror < minerr - 1e-9:
                 minerr = aerror
                 best = a.copy()
+                stall = 0
+            else:
+                stall += 1
+                if stall >= 3:
+                    break
 
             iteration += 1
 
@@ -877,6 +1053,183 @@ class WaveGenerator:
 
         wf = np.cos(w * tmp1 * tmp2) * np.exp(-(tmp2 / gamma)**2)
         return wf
+
+
+    @staticmethod
+    def _wfunc_atik(n, dt, itm, P, zeta):
+        """改进 tapered cosine wavelet（Atik & Abrahamson 2010）
+
+        替换 Gaussian-modulated cosine，采用分段 Hann taper 包络，
+        并施加零均值和零一阶矩约束，防止速度/位移漂移。
+        """
+        TWO_PI = 2.0 * np.pi
+        t_peak = (itm - 1) * dt
+
+        f = 1.0 / P
+        w = TWO_PI / P
+        tmp1 = np.sqrt(1.0 - zeta ** 2)
+        w_d = w * tmp1
+
+        deltaT = np.arctan(tmp1 / zeta) / w_d if abs(w_d) > 1e-30 else 0.0
+
+        # 频率自适应持续时间
+        n_cycles = 3.0 if P > 0.5 else 5.0
+        duration = n_cycles * P
+
+        # 超短周期：采样点过少，跳过矩约束避免压没信号
+        n_points_est = int(duration / dt)
+        skip_moment_constraints = n_points_est < 12
+
+        tau_rise = 0.25 * duration
+        tau_fall = 0.35 * duration
+        t_start = t_peak - 0.45 * duration
+        t_end = t_start + duration
+
+        t = np.arange(n) * dt
+        mask = (t >= t_start) & (t <= t_end)
+        t_wave = t[mask]
+
+        if len(t_wave) == 0:
+            return np.zeros(n, dtype=np.float64)
+
+        # 包络构造
+        envelope = np.zeros_like(t_wave, dtype=np.float64)
+
+        rise_mask = (t_wave >= t_start) & (t_wave < t_start + tau_rise)
+        if np.any(rise_mask):
+            envelope[rise_mask] = 0.5 * (
+                1.0 - np.cos(np.pi * (t_wave[rise_mask] - t_start) / tau_rise)
+            )
+
+        flat_mask = (t_wave >= t_start + tau_rise) & (t_wave <= t_end - tau_fall)
+        if np.any(flat_mask):
+            envelope[flat_mask] = 1.0
+
+        fall_mask = (t_wave > t_end - tau_fall) & (t_wave <= t_end)
+        if np.any(fall_mask):
+            envelope[fall_mask] = 0.5 * (
+                1.0 - np.cos(np.pi * (t_end - t_wave[fall_mask]) / tau_fall)
+            )
+
+        # 载波（与旧 _wfunc 一致的相位补偿）
+        tau = t_wave - t_peak + deltaT
+        carrier = np.cos(w_d * tau)
+
+        # 原始 wavelet
+        w_raw = envelope * carrier
+
+        # 施加零均值和零一阶矩约束（超短周期跳过）
+        if skip_moment_constraints:
+            w_corrected = w_raw
+        else:
+            w_corrected = WaveGenerator._apply_moment_constraints(
+                w_raw, t_wave, t_peak, envelope
+            )
+
+        wf = np.zeros(n, dtype=np.float64)
+        wf[mask] = w_corrected
+        return wf
+
+    @staticmethod
+    def _apply_moment_constraints(w_raw, t, t_peak, envelope):
+        """对 wavelet 施加零均值和零一阶矩约束（事后修正法）。
+
+        在原始 wavelet 上叠加两个修正基函数的线性组合，
+        使修正后的 wavelet 满足 ∫w dt = 0 且 ∫t·w dt = 0。
+        """
+        # 计算原始矩
+        m0 = np.trapz(w_raw, t)
+        m1 = np.trapz(w_raw * (t - t_peak), t)
+
+        dt_local = t[1] - t[0] if len(t) > 1 else 1.0
+        threshold = 1e-12 * dt_local * len(t)
+        if abs(m0) < threshold and abs(m1) < threshold:
+            return w_raw
+
+        # 修正基函数
+        b0 = envelope.copy()
+        b1 = envelope * (t - t_peak)
+
+        # Gram 矩阵
+        g00 = np.trapz(b0, t)
+        g01 = np.trapz(b0 * (t - t_peak), t)
+        g11 = np.trapz(b1 * (t - t_peak), t)
+
+        G = np.array([[g00, g01], [g01, g11]])
+
+        try:
+            coeffs = np.linalg.solve(G, [m0, m1])
+        except np.linalg.LinAlgError:
+            coeffs = np.array([m0 / g00 if g00 > 1e-30 else 0.0, 0.0])
+
+        return w_raw - coeffs[0] * b0 - coeffs[1] * b1
+
+    @staticmethod
+    def _select_control_points(periods, target, current, K, nP):
+        """自适应分批选择控制点。
+
+        按误差降序选择，排除相邻点（避免 wavelet 重叠干涉）。
+        始终包含首尾两个端点。
+        """
+        rel_error = np.abs(target - current) / np.maximum(target, 1e-30)
+        selected = [0, nP - 1]
+        sorted_indices = np.argsort(rel_error)[::-1]
+
+        for idx in sorted_indices:
+            if len(selected) >= K:
+                break
+            if idx in selected:
+                continue
+
+            P_idx = float(periods[idx])
+            min_sep = 0.15 * P_idx
+
+            too_close = False
+            for s in selected:
+                if abs(float(periods[s]) - P_idx) < min_sep:
+                    too_close = True
+                    break
+
+            if not too_close:
+                selected.append(idx)
+
+        return sorted(selected)
+
+    @staticmethod
+    def _adaptive_K(aerror, nP):
+        """根据当前误差自适应选择 K 值。"""
+        if aerror > 0.30:
+            return min(50, nP)
+        elif aerror > 0.15:
+            return min(80, nP)
+        elif aerror > 0.05:
+            return min(120, nP)
+        else:
+            return min(150, nP)
+
+    @staticmethod
+    def _solve_tikhonov(M, dR, lam=1.0):
+        """Tikhonov 正则化求解 (M^T M + lam*I) alpha = M^T dR"""
+        MtM = M.T @ M
+        MtdR = M.T @ dR
+        # 添加正则化
+        A = MtM + lam * np.eye(M.shape[1])
+        try:
+            alpha = np.linalg.solve(A, MtdR)
+        except np.linalg.LinAlgError:
+            alpha, _, _, _ = np.linalg.lstsq(A, MtdR, rcond=None)
+        alpha = np.nan_to_num(alpha, nan=0.0, posinf=0.0, neginf=0.0)
+        alpha = np.clip(alpha, -1e3, 1e3)
+        return alpha
+
+    @staticmethod
+    def _update_lambda(lambda_prev, error_prev, error_current, factor=4.0):
+        """LM 阻尼因子自适应更新。"""
+        if error_current < error_prev:
+            return max(lambda_prev / factor, 1e-6)
+        else:
+            return min(lambda_prev * factor, 1e6)
+
 
     @staticmethod
     def _ramixed(acc, n, dt, zeta, P):
@@ -1134,6 +1487,53 @@ class WaveGenerator:
         return aerror, merror
 
     @staticmethod
+    def _adjust_peak_linear(acc, peak_target):
+        """全局线性缩放增压（替代单点硬裁剪），保持谱形不变。
+
+        当 current_peak < peak_target 时，整个信号统一乘以
+        peak_target / current_peak，不做任何裁剪或单点硬推。
+        """
+        result = acc.copy()
+        current_peak = float(np.max(np.abs(result)))
+        if current_peak < 1e-30 or current_peak >= peak_target:
+            return result
+        scale = peak_target / current_peak
+        return result * scale
+
+    @staticmethod
+    def _adjust_peak_staged(acc, peak_target, stages=4, adjust_fn=None):
+        """分阶段渐进增压，每步使用全局线性缩放而非单点硬裁剪。
+
+        Parameters
+        ----------
+        acc : np.ndarray
+            输入加速度时程
+        peak_target : float
+            目标 PGA
+        stages : int
+            分阶段数（默认 4）
+        adjust_fn : callable, optional
+            每阶段后可选的谱形修正回调，签名 adjust_fn(acc) -> acc
+
+        Returns
+        -------
+        np.ndarray
+            增压后的加速度时程
+        """
+        result = acc.copy()
+        current_peak = float(np.max(np.abs(result)))
+        if current_peak < 1e-30 or current_peak >= peak_target:
+            return result
+
+        step_targets = np.linspace(current_peak, peak_target, stages + 1)[1:]
+        for step_target in step_targets:
+            scale = step_target / float(np.max(np.abs(result)))
+            result = result * scale
+            if adjust_fn is not None:
+                result = adjust_fn(result)
+        return result
+
+    @staticmethod
     def _adjust_peak(acc, peak0):
         """裁剪峰值（复现 EQSignal adjustpeak）"""
         result = acc.copy()
@@ -1197,7 +1597,7 @@ class WaveGenerator:
 
 
 def create_ground_motion(type, Mw, R, Vs30=760.0, fault_type="strike_slip",
-                         n=4096, dt=0.02, zeta=0.05, tol=0.05, max_iter=1,
+                         n=4096, dt=0.02, zeta=0.05, tol=0.05, max_iter=20,
                          **kwargs):
     """便捷工厂函数：按类型创建特殊地震动。"""
     from .gmpe import GMPEAdapter, FaultType, MotionType
@@ -1277,7 +1677,7 @@ class FarFieldGenerator:
     def generate(cls,
                  Mw, R, Vs30=760, fault_type="strike_slip",
                  n=None, dt=None, zeta=None,
-                 tol=0.05, max_iter=1, fm=1,
+                 tol=0.05, max_iter=20, fm=1,
                  progress_callback=None,
                  **kwargs):
         from .gmpe import GMPEAdapter, MotionType
@@ -1314,7 +1714,7 @@ class NearFieldNoPulseGenerator:
     def generate(cls,
                  Mw, R, Vs30=760, fault_type="strike_slip",
                  n=None, dt=None, zeta=None,
-                 tol=0.05, max_iter=1, fm=1,
+                 tol=0.05, max_iter=20, fm=1,
                  progress_callback=None,
                  **kwargs):
         from .gmpe import GMPEAdapter, MotionType
@@ -1358,7 +1758,7 @@ class NearFieldPulseGenerator:
     def generate(cls,
                  Mw, R, Vs30=760, fault_type="strike_slip",
                  n=None, dt=None, zeta=None,
-                 tol=0.05, max_iter=1, fm=0,
+                 tol=0.05, max_iter=20, fm=0,
                  progress_callback=None,
                  phi=None, t_total=None,
                  Tp_override=None, A_override=None,
