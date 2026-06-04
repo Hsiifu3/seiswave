@@ -50,6 +50,8 @@ class CenterPanel(QWidget):
         self._splitter.setSizes([360, 240])
 
         layout.addWidget(self._splitter)
+        # 生成前显示占位提示，替代空的 0-1 坐标图
+        self._time_plot.show_placeholder("生成人工波后显示加速度时程")
 
     @property
     def spec_plot(self):

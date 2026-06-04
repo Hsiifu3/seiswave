@@ -61,6 +61,21 @@ class PlotCanvas(FigureCanvasQTAgg):
         colors = get_mpl_colors(self._dark)
         self._apply_style(self.ax, colors)
 
+    def show_placeholder(self, text):
+        """空状态：隐藏坐标轴，居中显示提示文字，替代空的 0-1 坐标图。"""
+        self.ax.clear()
+        colors = get_mpl_colors(self._dark)
+        self.fig.set_facecolor(colors['bg'])
+        self.ax.set_facecolor(colors['bg'])
+        self.ax.set_xticks([])
+        self.ax.set_yticks([])
+        for spine in self.ax.spines.values():
+            spine.set_visible(False)
+        self.ax.text(0.5, 0.5, text, ha='center', va='center',
+                     transform=self.ax.transAxes,
+                     color=colors['fg'], fontsize=12, alpha=0.55)
+        self.refresh()
+
     def refresh(self):
         self.fig.tight_layout(pad=2.0)
         self.draw()
@@ -194,6 +209,9 @@ class PlotWidget(QWidget):
 
     def clear(self):
         self.canvas.clear()
+
+    def show_placeholder(self, text):
+        self.canvas.show_placeholder(text)
 
     def refresh(self):
         self.canvas.refresh()
