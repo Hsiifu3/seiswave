@@ -662,83 +662,47 @@ class TestResultPresenterMore:
 
 
 class TestResultPanel:
-    def test_set_results_and_update_total(self, qapp):
-        from seiswave.gui.panels.result_panel import ResultPanel
-
-        panel = ResultPanel()
-        panel.set_results([1, 2, 3])
-        panel._n_art_spin.setValue(2)
-        panel._update_total()
-        assert panel._n_natural_label.text() == "3"
-        assert panel._total_label.text() == "共 5 组"
-
-    def test_generate_report_writes_preview_and_file(self, qapp, monkeypatch):
+    def test_set_results_populates_preview(self, qapp):
         from types import SimpleNamespace
         from seiswave.gui.panels.result_panel import ResultPanel
         from seiswave.core.selector import SelectionResult
-        import tempfile
 
         panel = ResultPanel()
         rec = SimpleNamespace(rsn=1, event="E", station="S", component="H1")
-        res = SelectionResult(record=rec, scale_factor=1.2, match_error=0.03, deviations={1.0: 0.1})
-        panel.set_results([res])
-        panel._generated_waves = [SimpleNamespace(name="art1", acc=np.array([0.0, 0.1]), n=2, dt=0.02)]
+        res = SelectionResult(record=rec, scale_factor=1.2, match_error=0.03,
+                              deviations={1.0: 0.1})
         panel.set_code_spectrum(np.array([0.1, 0.5]), np.array([0.2, 0.3]))
-
-        msgs = []
-        monkeypatch.setattr("seiswave.gui.panels.result_panel.QMessageBox.information", lambda *a: msgs.append(a[-1]))
-        tmpdir = tempfile.mkdtemp()
-        panel._dir_edit.setText(tmpdir)
-        panel._generate_report()
-
+        panel.set_results([res])
+        # 预览-only 设计：set_results 直接刷新报告预览，不再有输出目录/合计控件
         assert "SeisWave 地震动选波与人工波组合报告" in panel._preview.toPlainText()
-        assert any("报告已保存" in msg for msg in msgs)
+        assert "RSN1" in panel._preview.toPlainText()
 
-    def test_do_export_warns_without_dir(self, qapp, monkeypatch):
-        from seiswave.gui.panels.result_panel import ResultPanel
-
-        panel = ResultPanel()
-        warnings = []
-        monkeypatch.setattr("seiswave.gui.panels.result_panel.QMessageBox.warning", lambda *a: warnings.append(a[-1]))
-        panel._do_export()
-        assert warnings == ["请先选择输出目录"]
-
-    def test_do_export_uses_combiner_and_updates_preview(self, qapp, monkeypatch):
+    def test_add_generated_wave_updates_preview(self, qapp):
         from types import SimpleNamespace
         from seiswave.gui.panels.result_panel import ResultPanel
-        import tempfile
-
-        class FakeCombiner:
-            def __init__(self, output_dir):
-                self.output_dir = output_dir
-                self.groups = [SimpleNamespace(name="g1", h1=SimpleNamespace(acc=np.array([0.0]), dt=0.02))]
-                self.natural = []
-                self.artificial = []
-            def add_natural(self, r, db):
-                self.natural.append((r, db))
-            def add_artificial(self, h1=None, index=None):
-                self.artificial.append((h1, index))
-            def export(self, fmt='at2'):
-                self.fmt = fmt
-            def report_text(self):
-                return "fake report"
-
-        monkeypatch.setattr("seiswave.gui.panels.result_panel.Combiner", FakeCombiner)
-        monkeypatch.setattr("seiswave.gui.panels.result_panel.QMessageBox.information", lambda *a: None)
 
         panel = ResultPanel()
-        panel._dir_edit.setText(tempfile.mkdtemp())
-        panel._results = ["r1"]
-        panel._database = "db"
-        panel._generated_waves = [SimpleNamespace(name="art", acc=np.array([0.0]), dt=0.02)]
-        panel._wave_fmt_combo.setCurrentIndex(1)
-        panel._export_spec_check.setChecked(False)
-        panel._export_img_check.setChecked(False)
+        panel.set_code_spectrum(np.array([0.1, 0.5]), np.array([0.2, 0.3]))
+        panel.add_generated_wave(
+            SimpleNamespace(name="art1", acc=np.array([0.0, 0.1]), n=2, dt=0.02))
+        text = panel._preview.toPlainText()
+        assert "人工波结果" in text
+        assert "art1" in text
 
-        panel._do_export()
-        assert panel._combiner is not None
-        assert panel._combiner.fmt == "txt"
-        assert panel._preview.toPlainText() == "fake report"
+    def test_empty_results_clears_preview(self, qapp):
+        from seiswave.gui.panels.result_panel import ResultPanel
+
+        panel = ResultPanel()
+        panel.set_results([])
+        assert panel._preview.toPlainText() == ""
+
+    def test_no_legacy_export_widgets(self, qapp):
+        # 方案C：导出统一由组合面板负责，result 面板不应再有导出控件
+        from seiswave.gui.panels.result_panel import ResultPanel
+
+        panel = ResultPanel()
+        for attr in ("_dir_edit", "_do_export", "_export_btn", "_wave_fmt_combo"):
+            assert not hasattr(panel, attr), f"残留旧导出成员: {attr}"
 
 
 class TestImportPanel:
