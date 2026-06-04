@@ -25,7 +25,7 @@ class CenterPanel(QWidget):
         self._setup_ui()
 
     def _setup_ui(self):
-        self.setMinimumWidth(500)
+        self.setMinimumWidth(440)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         layout = QVBoxLayout(self)

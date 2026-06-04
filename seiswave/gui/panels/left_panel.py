@@ -59,8 +59,9 @@ class LeftPanel(QWidget):
         outer.setSpacing(0)
         outer.addWidget(self._scroll)
 
-        self.setFixedWidth(320)
-        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        self.setMinimumWidth(280)
+        self.setMaximumWidth(300)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
 
         # 转发信号
         self._param_form.run_clicked.connect(self.run_clicked.emit)

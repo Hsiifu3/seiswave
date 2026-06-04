@@ -24,7 +24,11 @@ class SummaryPanel(QWidget):
         self._table.setColumnCount(7)
         self._table.setHorizontalHeaderLabels(["类型", "标识", "事件/名称", "缩放", "RMSE", "PGA(g)", "持时(s)"])
         self._table.verticalHeader().setVisible(False)
-        self._table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        _hh = self._table.horizontalHeader()
+        _hh.setSectionResizeMode(2, QHeaderView.Stretch)  # 事件/名称 撑满
+        for _c in (0, 1, 3, 4, 5, 6):                      # 其余列按内容自适应
+            _hh.setSectionResizeMode(_c, QHeaderView.ResizeToContents)
+        self._table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         layout.addWidget(self._table)
 
     def set_code_spectrum(self, periods, sa):

@@ -22,8 +22,9 @@ class RightPanel(QWidget):
         self._setup_ui()
 
     def _setup_ui(self):
-        self.setFixedWidth(280)
-        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        self.setMaximumWidth(240)
+        self.setMinimumWidth(200)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
