@@ -107,8 +107,12 @@ class SelectorPanel(QWidget):
         self._browse_table.verticalHeader().setVisible(False)
         self._browse_table.setMaximumHeight(150)
         bh = self._browse_table.horizontalHeader()
-        bh.setSectionResizeMode(1, QHeaderView.Stretch)
-        bh.setSectionResizeMode(2, QHeaderView.Stretch)
+        bh.setSectionResizeMode(0, QHeaderView.ResizeToContents)  # RSN
+        bh.setSectionResizeMode(1, QHeaderView.Stretch)           # 事件
+        bh.setSectionResizeMode(2, QHeaderView.Stretch)           # 台站
+        bh.setSectionResizeMode(3, QHeaderView.ResizeToContents)  # PGA
+        bh.setSectionResizeMode(4, QHeaderView.ResizeToContents)  # 持时
+        self._browse_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         browse_layout.addWidget(self._browse_table)
         self._browse_count_label = QLabel("")
         browse_layout.addWidget(self._browse_count_label)
@@ -312,6 +316,14 @@ class SelectorPanel(QWidget):
     def set_code_spectrum(self, periods, sa):
         self._code_periods = np.asarray(periods)
         self._code_sa = np.asarray(sa)
+        # 立即绘制规范谱，避免选波前右侧谱图空白
+        if getattr(self, "_results", None):
+            self._plot_results()
+        else:
+            self._plot.clear()
+            self._plot.plot_code_spectrum(self._code_periods, self._code_sa)
+            self._plot.plot_envelope(self._code_periods, self._code_sa)
+            self._plot.refresh()
 
     def set_isolation_mode(self, isolation, T_isolation=None):
         """设置隔震模式和隔震周期"""

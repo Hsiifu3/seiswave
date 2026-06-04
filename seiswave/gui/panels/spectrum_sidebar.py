@@ -36,6 +36,8 @@ class SpectrumSidebar(QWidget):
     # ── UI 构建 ──
 
     def _setup_ui(self):
+        # 侧栏最小宽度，避免下拉框/按钮被 dock 裁切
+        self.setMinimumWidth(250)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -49,37 +51,37 @@ class SpectrumSidebar(QWidget):
         # ── 规范选择 ──
         code_group = QGroupBox("规范")
         code_form = QFormLayout(code_group)
-        code_form.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        code_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
         code_form.setLabelAlignment(Qt.AlignRight)
         self._code_combo = QComboBox()
         self._code_combo.addItems(["GB 50011-2010", "GB/T 51408（隔震）", "自定义谱"])
-        self._code_combo.setFixedWidth(160)
+        self._code_combo.setMinimumWidth(160)
         code_form.addRow("规范:", self._code_combo)
         layout.addWidget(code_group)
 
         # ── GB 50011 参数 ──
         self._gb_group = QGroupBox("GB 50011 参数")
         gb_form = QFormLayout(self._gb_group)
-        gb_form.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        gb_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
         gb_form.setLabelAlignment(Qt.AlignRight)
         self._intensity_combo = QComboBox()
         self._intensity_combo.addItems(["6度", "7度", "7度半", "8度", "8度半", "9度"])
-        self._intensity_combo.setFixedWidth(140)
+        self._intensity_combo.setMinimumWidth(140)
         gb_form.addRow("设防烈度:", self._intensity_combo)
 
         self._group_combo = QComboBox()
         self._group_combo.addItems(["第一组", "第二组", "第三组"])
-        self._group_combo.setFixedWidth(140)
+        self._group_combo.setMinimumWidth(140)
         gb_form.addRow("地震分组:", self._group_combo)
 
         self._site_combo = QComboBox()
         self._site_combo.addItems(["I₀类", "I₁类", "II类", "III类", "IV类"])
-        self._site_combo.setFixedWidth(140)
+        self._site_combo.setMinimumWidth(140)
         gb_form.addRow("场地类别:", self._site_combo)
 
         self._level_combo = QComboBox()
         self._level_combo.addItems(["多遇地震", "设防地震", "罕遇地震"])
-        self._level_combo.setFixedWidth(140)
+        self._level_combo.setMinimumWidth(140)
         gb_form.addRow("地震水准:", self._level_combo)
 
         layout.addWidget(self._gb_group)
@@ -87,17 +89,17 @@ class SpectrumSidebar(QWidget):
         # ── 隔震周期（GB 51408 模式下显示）──
         self._iso_group = QGroupBox("隔震周期")
         iso_form = QFormLayout(self._iso_group)
-        iso_form.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        iso_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
         iso_form.setLabelAlignment(Qt.AlignRight)
 
         self._t_before_spin = QDoubleSpinBox()
         self._t_before_spin.setRange(0.01, 10.0); self._t_before_spin.setValue(1.0)
-        self._t_before_spin.setDecimals(2); self._t_before_spin.setFixedWidth(100)
+        self._t_before_spin.setDecimals(2); self._t_before_spin.setMinimumWidth(100)
         iso_form.addRow("隔震前 T (s):", self._t_before_spin)
 
         self._t_after_spin = QDoubleSpinBox()
         self._t_after_spin.setRange(0.01, 10.0); self._t_after_spin.setValue(3.0)
-        self._t_after_spin.setDecimals(2); self._t_after_spin.setFixedWidth(100)
+        self._t_after_spin.setDecimals(2); self._t_after_spin.setMinimumWidth(100)
         iso_form.addRow("隔震后 T (s):", self._t_after_spin)
 
         self._iso_group.setVisible(False)
@@ -135,14 +137,14 @@ class SpectrumSidebar(QWidget):
         damp_group = QGroupBox("阻尼比")
         damp_form = QFormLayout(damp_group)
         damp_form.setLabelAlignment(Qt.AlignRight)
-        damp_form.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        damp_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
 
         self._zeta_spin = QDoubleSpinBox()
         self._zeta_spin.setRange(0.01, 0.30)
         self._zeta_spin.setSingleStep(0.01)
         self._zeta_spin.setValue(0.05)
         self._zeta_spin.setDecimals(2)
-        self._zeta_spin.setFixedWidth(100)
+        self._zeta_spin.setMinimumWidth(100)
         damp_form.addRow("阻尼比 ζ:", self._zeta_spin)
 
         layout.addWidget(damp_group)

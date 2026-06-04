@@ -114,11 +114,13 @@ class MainWindow(QMainWindow):
 
     def _setup_sidebar(self):
         self._sidebar = SpectrumSidebar(dark=self._dark)
+        self._sidebar.setMaximumWidth(340)
         dock = QDockWidget("设防参数", self)
         dock.setWidget(self._sidebar)
         dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
         self.addDockWidget(Qt.LeftDockWidgetArea, dock)
         self._sidebar_dock = dock
+        self.resizeDocks([dock], [280], Qt.Horizontal)
 
     # ── central: step indicator + stacked panels + nav buttons ──
 
@@ -153,13 +155,19 @@ class MainWindow(QMainWindow):
         self._stack.addWidget(self._selector_panel)
         # Step 2: 生成 (artificial wave)
         self._stack.addWidget(self._generator_panel)
-        # Step 3: 组合 (combine + summary + result)
+        # Step 3: 组合 (combine 在上；下方 summary 表 与 result 导出/预览 左右并排，
+        # 把原先三面板纵叠造成的挤压改为横向利用)
         step3 = QWidget()
         s3_layout = QVBoxLayout(step3)
         s3_layout.setContentsMargins(0, 0, 0, 0)
+        s3_layout.setSpacing(6)
         s3_layout.addWidget(self._combine_panel, 3)
-        s3_layout.addWidget(self._summary_panel, 1)
-        s3_layout.addWidget(self._result_panel, 2)
+        s3_bottom = QHBoxLayout()
+        s3_bottom.setContentsMargins(0, 0, 0, 0)
+        s3_bottom.setSpacing(6)
+        s3_bottom.addWidget(self._summary_panel, 1)
+        s3_bottom.addWidget(self._result_panel, 1)
+        s3_layout.addLayout(s3_bottom, 2)
         self._stack.addWidget(step3)
 
         splitter.addWidget(self._stack)
@@ -204,8 +212,9 @@ class MainWindow(QMainWindow):
         self._current_step = index
         self._stack.setCurrentIndex(index)
         self._step_indicator.set_step(index)
-        # 生成页本身已有双图对比，隐藏底部共享谱图避免界面被压缩。
-        self._shared_plot.setVisible(index != 2)
+        # 共享谱图仅在 step0（规范谱/导入）显示；选波/生成/组合页面板自带谱图，
+        # 避免每步底部重复一张几乎相同的规范谱图、并为面板腾出纵向空间。
+        self._shared_plot.setVisible(index == 0)
         self._update_nav()
         names = ["规范谱 / 导入", "选波", "人工波生成", "组合 / 导出"]
         if 0 <= index < len(names):
