@@ -177,7 +177,7 @@ class ParamFormWidget(QWidget):
         self._maxiter_spin = QSpinBox()
         self._maxiter_spin.setRange(1, 200)
         self._maxiter_spin.setSingleStep(1)
-        self._maxiter_spin.setValue(1)
+        self._maxiter_spin.setValue(20)
         self._maxiter_spin.setFixedWidth(120)
         iter_form.addRow("最大迭代次数:", self._maxiter_spin)
 
@@ -302,7 +302,7 @@ class ParamFormWidget(QWidget):
         self._pga_spin.setValue(0.20)
         self._zeta_spin.setValue(0.05)
         self._tol_spin.setValue(0.05)
-        self._maxiter_spin.setValue(1)
+        self._maxiter_spin.setValue(20)
         self._trials_spin.setValue(1)
         self._algo_combo.setCurrentIndex(0)
         self._target_info_label.setText("尚未设置")
