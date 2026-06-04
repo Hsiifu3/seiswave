@@ -78,6 +78,7 @@ class ImportPanel(QWidget):
         preview_layout.setContentsMargins(0, 0, 0, 0)
 
         self._plot = PlotWidget(dark=self._dark, show_toolbar=False)
+        self._plot.show_placeholder("选择地震波以预览时程曲线")
         preview_layout.addWidget(self._plot)
 
         # 信息栏
