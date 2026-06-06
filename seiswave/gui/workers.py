@@ -496,6 +496,7 @@ class SpecialGroundMotionWorker(BaseWorker):
     def __init__(self, gm_type, Mw, R, Vs30=760.0,
                  fault_type="strike_slip", n=4096, dt=0.02,
                  zeta=0.05, tol=0.05, max_iter=50, fm=0,
+                 spectrum_source="code", code_periods=None, code_sa=None,
                  parent=None, job_id=None):
         super().__init__(parent, job_id=job_id)
         self._gm_type = gm_type
@@ -509,13 +510,16 @@ class SpecialGroundMotionWorker(BaseWorker):
         self._tol = tol
         self._max_iter = max_iter
         self._fm = fm
+        self._spectrum_source = spectrum_source
+        self._code_periods = code_periods
+        self._code_sa = code_sa
 
     def execute(self):
         from seiswave.core.generator import create_ground_motion
-        logger.info("[%s] SpecialGroundMotionWorker execute type=%s Mw=%.3f R=%.3f Vs30=%.1f fault=%s algo=%s n=%s dt=%.5f tol=%.4f max_iter=%s",
+        logger.info("[%s] SpecialGroundMotionWorker execute type=%s Mw=%.3f R=%.3f Vs30=%.1f fault=%s algo=%s spectrum_source=%s n=%s dt=%.5f tol=%.4f max_iter=%s",
                     self._job_id, self._gm_type, self._Mw, self._R, self._Vs30,
-                    self._fault_type, _algo_name(self._fm), self._n, self._dt,
-                    self._tol, self._max_iter)
+                    self._fault_type, _algo_name(self._fm), self._spectrum_source,
+                    self._n, self._dt, self._tol, self._max_iter)
 
         def progress_cb(iteration, max_err, mean_err):
             if self.is_cancelled:
@@ -539,6 +543,9 @@ class SpecialGroundMotionWorker(BaseWorker):
             tol=self._tol,
             max_iter=self._max_iter,
             fm=self._fm,
+            spectrum_source=self._spectrum_source,
+            code_periods=self._code_periods,
+            code_sa=self._code_sa,
             progress_callback=progress_cb,
         )
         acc = getattr(result, 'acc', None)

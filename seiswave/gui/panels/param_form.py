@@ -93,6 +93,15 @@ class ParamFormWidget(QWidget):
         self._fault_combo.addItems(["strike_slip", "normal", "reverse"])
         special_form.addRow("断层类型:", self._fault_combo)
 
+        # 目标谱来源（方案甲：GB50011 设计谱 + 近场系数；方案乙：GMPE 情景谱）
+        self._spectrum_source_combo = QComboBox()
+        self._spectrum_source_combo.addItems(["规范设计谱 (GB50011)", "GMPE 情景谱"])
+        special_form.addRow("目标谱来源:", self._spectrum_source_combo)
+
+        self._nf_factor_label = QLabel("—")
+        self._nf_factor_label.setStyleSheet("color: #666;")
+        special_form.addRow("近断层系数:", self._nf_factor_label)
+
         self._special_group.setVisible(False)
         layout.addWidget(self._special_group)
 
@@ -197,6 +206,9 @@ class ParamFormWidget(QWidget):
 
         layout.addStretch()
 
+        # 连接 R 变化以实时更新近断层系数标签
+        self._r_spin.valueChanged.connect(self._update_nf_factor_label)
+
     # ── 类型切换 ──
 
     def _on_type_changed(self, index):
@@ -219,10 +231,36 @@ class ParamFormWidget(QWidget):
             "仅近场脉冲 NFP 需要指定断层类型" if not is_nfp else ""
         )
 
+        # 刷新近断层系数标签
+        self._update_nf_factor_label()
+
         self._pga_spin.setEnabled(False)
         self._pga_spin.setToolTip("由当前目标谱自动确定")
         self._run_btn.setText(f"生成 {label}")
         self.type_changed.emit(index)
+
+    def _update_nf_factor_label(self):
+        """刷新近断层放大系数标签（GB50011-2010 §3.10 + 附录L）。"""
+        label = GM_TYPE_LABELS[self._type_combo.currentIndex()]
+        if label == "一般人工波":
+            self._nf_factor_label.setText("—")
+            return
+        R = self._r_spin.value()
+        if label == "远场 FF":
+            factor = 1.0
+            desc = "×1.0 (远场无放大)"
+        else:  # NF / NFP
+            if R < 5.0:
+                factor = 1.5
+                desc = f"×1.5 (R={R:.1f} < 5km)"
+            elif R <= 10.0:
+                factor = 1.25
+                desc = f"×1.25 (5 ≤ R={R:.1f} ≤ 10km)"
+            else:
+                factor = 1.0
+                desc = f"×1.0 (R={R:.1f} > 10km)"
+        self._nf_factor_label.setText(desc)
+
 
     def _on_duration_changed(self, value):
         """持时改变时自动计算 n = round(持时 / dt)"""
@@ -248,9 +286,12 @@ class ParamFormWidget(QWidget):
         # 算法映射：时域法=1，频域法=0
         fm_map = {"时域法": 1, "频域法": 0}
         fm = fm_map.get(self._algo_combo.currentText(), 1)
+        # 目标谱来源：规范设计谱(默认) / GMPE情景谱
+        spectrum_source = "code" if self._spectrum_source_combo.currentIndex() == 0 else "gmpe"
         return {
             'type_label': self._type_combo.currentText(),
             'type_code': GM_TYPE_CODES[self._type_combo.currentText()],
+            'spectrum_source': spectrum_source,
             'Mw': self._mw_spin.value(),
             'R': self._r_spin.value(),
             'Vs30': self._vs30_spin.value(),

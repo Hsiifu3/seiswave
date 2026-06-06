@@ -109,7 +109,7 @@ class GeneratorController(QObject):
                         'Mw': params['Mw'], 'R': params['R'], 'Vs30': params['Vs30'],
                         'fault_type': params['fault_type'], 'n': params['n'], 'dt': params['dt'],
                         'zeta': params['zeta'], 'tol': params['tol'], 'max_iter': params['max_iter'],
-                        'fm': fm,
+                        'fm': fm, 'spectrum_source': params.get('spectrum_source', 'code'),
                     })
         self._worker = SpecialGroundMotionWorker(
             gm_type=gm_type,
@@ -123,6 +123,9 @@ class GeneratorController(QObject):
             tol=params['tol'],
             max_iter=params['max_iter'],
             fm=fm,
+            spectrum_source=params.get('spectrum_source', 'code'),
+            code_periods=code_periods,
+            code_sa=code_sa,
             parent=self,
             job_id=self._job_id,
         )
