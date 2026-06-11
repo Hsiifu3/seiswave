@@ -1700,6 +1700,20 @@ def _build_special_target(spectrum_source, code_periods, code_sa,
     return gmpe_compute()
 
 
+def _special_gmpe_compute(spectrum_source, Mw, R, Vs30, ft, motion_type,
+                          region, axis):
+    """按 spectrum_source 选择 GMPE：
+    - "gmpe" → ChinaGMPEAdapter（第五代区划 GB18306-2015，符合规范）
+    - 其它（回退）→ 简化 ASK14 GMPEAdapter（仅用于无 code_sa 的兼容回退）
+    """
+    from .gmpe import GMPEAdapter
+    if spectrum_source == "gmpe":
+        from .gmpe import ChinaGMPEAdapter
+        return ChinaGMPEAdapter.compute_spectrum(Mw, R, region=region, axis=axis)
+    return GMPEAdapter.compute_spectrum(
+        Mw=Mw, R=R, Vs30=Vs30, fault_type=ft, motion_type=motion_type)
+
+
 
 # ── FarFieldGenerator ──
 
@@ -1713,20 +1727,22 @@ class FarFieldGenerator:
                  tol=0.05, max_iter=20, fm=1,
                  progress_callback=None,
                  spectrum_source="code", code_periods=None, code_sa=None,
+                 region="east_strong", axis="major",
                  **kwargs):
-        from .gmpe import GMPEAdapter, MotionType
+        from .gmpe import MotionType
         from .envelope_presets import get_envelope
         n = n or 4096
         dt = dt or 0.02
         zeta = zeta or 0.05
 
         ft = _resolve_fault_type(fault_type)
-        factor = _near_field_factor(R, MotionType.FAR_FIELD)  # 远场恒 1.0
+        # 近场系数仅在规范设计谱(code)模式下应用；GMPE 模式由衰减关系自含距离效应
+        factor = (1.0 if spectrum_source == "gmpe"
+                  else _near_field_factor(R, MotionType.FAR_FIELD))
         periods, target_sa = _build_special_target(
             spectrum_source, code_periods, code_sa, factor,
-            lambda: GMPEAdapter.compute_spectrum(
-                Mw=Mw, R=R, Vs30=Vs30,
-                fault_type=ft, motion_type=MotionType.FAR_FIELD),
+            lambda: _special_gmpe_compute(spectrum_source, Mw, R, Vs30, ft,
+                                          MotionType.FAR_FIELD, region, axis),
         )
 
         pga = _estimate_pga_from_spectrum(target_sa)
@@ -1756,20 +1772,21 @@ class NearFieldNoPulseGenerator:
                  tol=0.05, max_iter=20, fm=1,
                  progress_callback=None,
                  spectrum_source="code", code_periods=None, code_sa=None,
+                 region="east_strong", axis="major",
                  **kwargs):
-        from .gmpe import GMPEAdapter, MotionType
+        from .gmpe import MotionType
         from .envelope_presets import get_envelope
         n = n or 4096
         dt = dt or 0.01
         zeta = zeta or 0.05
 
         ft = _resolve_fault_type(fault_type)
-        factor = _near_field_factor(R, MotionType.NEAR_FIELD)
+        factor = (1.0 if spectrum_source == "gmpe"
+                  else _near_field_factor(R, MotionType.NEAR_FIELD))
         periods, target_sa = _build_special_target(
             spectrum_source, code_periods, code_sa, factor,
-            lambda: GMPEAdapter.compute_spectrum(
-                Mw=Mw, R=R, Vs30=Vs30,
-                fault_type=ft, motion_type=MotionType.NEAR_FIELD),
+            lambda: _special_gmpe_compute(spectrum_source, Mw, R, Vs30, ft,
+                                          MotionType.NEAR_FIELD, region, axis),
         )
 
         pga = _estimate_pga_from_spectrum(target_sa)
@@ -1809,8 +1826,9 @@ class NearFieldPulseGenerator:
                  Tp_override=None, A_override=None,
                  phi_override=None, t0_override=None,
                  spectrum_source="code", code_periods=None, code_sa=None,
+                 region="east_strong", axis="major",
                  **kwargs):
-        from .gmpe import GMPEAdapter, MotionType
+        from .gmpe import MotionType
         from .pulse import PulseCalculator, PulseWavelet, BakerPulseDetector
         from .residual import ResidualSpectrum
         from .signal import EQSignal as EQSig
@@ -1827,12 +1845,12 @@ class NearFieldPulseGenerator:
             from .gmpe import FaultType
             ft = FaultType.REVERSE
 
-        factor = _near_field_factor(R, MotionType.NEAR_FIELD_PULSE)
+        factor = (1.0 if spectrum_source == "gmpe"
+                  else _near_field_factor(R, MotionType.NEAR_FIELD_PULSE))
         periods, total_sa = _build_special_target(
             spectrum_source, code_periods, code_sa, factor,
-            lambda: GMPEAdapter.compute_spectrum(
-                Mw=Mw, R=R, Vs30=Vs30,
-                fault_type=ft, motion_type=MotionType.NEAR_FIELD_PULSE),
+            lambda: _special_gmpe_compute(spectrum_source, Mw, R, Vs30, ft,
+                                          MotionType.NEAR_FIELD_PULSE, region, axis),
         )
 
         # ── 1) 频域匹配生成基础信号 ──

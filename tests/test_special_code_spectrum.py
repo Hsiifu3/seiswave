@@ -120,13 +120,36 @@ def test_gmpe_fallback_when_no_code_sa():
 
 
 def test_gmpe_mode_explicit():
-    """显式 spectrum_source="gmpe" 走 GMPE 路径。"""
+    """显式 spectrum_source="gmpe" 走第五代区划 ChinaGMPE 路径。
+
+    GMPE 模式由衰减关系自含距离效应，不再叠加近场放大系数（factor=1.0）。
+    """
     from seiswave.core.generator import create_ground_motion
 
     sig = create_ground_motion(
         "NF", Mw=7.0, R=3.0, n=2000, dt=0.01, max_iter=5,
-        spectrum_source="gmpe",
+        spectrum_source="gmpe", region="east_strong", axis="major",
     )
-    assert sig.near_field_factor == 1.5
+    assert sig.near_field_factor == 1.0   # GMPE 模式不叠近场系数
     assert sig.spectrum_source == "gmpe"
     assert sig.acc.size > 0
+
+
+def test_china_gmpe_matches_5th_gen_spectrum():
+    """gmpe 模式输出谱应≈ 第五代区划 ChinaGMPE 设计谱。"""
+    import numpy as np
+    from seiswave.core.generator import create_ground_motion
+    from seiswave.core.gmpe import ChinaGMPEAdapter
+    from seiswave.core import Spectra
+
+    periods = np.geomspace(0.01, 6.0, 300)
+    sig = create_ground_motion(
+        "NF", Mw=7.0, R=10.0, n=2000, dt=0.02, max_iter=8,
+        spectrum_source="gmpe", region="east_strong", axis="major",
+    )
+    resp = Spectra.compute(sig.acc, sig.dt, periods, zeta=0.05, method="mixed").sa
+    _, target = ChinaGMPEAdapter.compute_spectrum(7.0, 10.0, "east_strong", "major", periods=periods)
+    mask = (periods >= 0.04) & (periods <= 2.0)
+    rms = np.sqrt(np.mean(((resp[mask] - target[mask]) / target[mask])**2)) * 100
+    assert rms < 12.0, f"gmpe 模式谱匹配第五代谱误差 {rms:.1f}% 超标"
+

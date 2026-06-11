@@ -93,14 +93,30 @@ class ParamFormWidget(QWidget):
         self._fault_combo.addItems(["strike_slip", "normal", "reverse"])
         special_form.addRow("断层类型:", self._fault_combo)
 
-        # 目标谱来源（方案甲：GB50011 设计谱 + 近场系数；方案乙：GMPE 情景谱）
+        # 目标谱来源（方案甲：GB50011 设计谱 + 近场系数；方案乙：第五代区划 GMPE 情景谱）
         self._spectrum_source_combo = QComboBox()
-        self._spectrum_source_combo.addItems(["规范设计谱 (GB50011)", "GMPE 情景谱"])
+        self._spectrum_source_combo.addItems(
+            ["规范设计谱 (GB50011)", "GMPE 情景谱 (第五代区划)"])
+        self._spectrum_source_combo.currentIndexChanged.connect(
+            self._on_spectrum_source_changed)
         special_form.addRow("目标谱来源:", self._spectrum_source_combo)
 
+        # 方案甲：近断层放大系数（只读展示）
         self._nf_factor_label = QLabel("—")
         self._nf_factor_label.setStyleSheet("color: #666;")
-        special_form.addRow("近断层系数:", self._nf_factor_label)
+        self._nf_factor_row_label = QLabel("近断层系数:")
+        special_form.addRow(self._nf_factor_row_label, self._nf_factor_label)
+
+        # 方案乙：第五代区划分区 + 椭圆轴
+        self._region_combo = QComboBox()
+        self._region_combo.addItems(["东部强震区", "中强地震区", "新疆区", "青藏区"])
+        self._region_row_label = QLabel("地震动分区:")
+        special_form.addRow(self._region_row_label, self._region_combo)
+
+        self._axis_combo = QComboBox()
+        self._axis_combo.addItems(["长轴", "短轴"])
+        self._axis_row_label = QLabel("椭圆轴:")
+        special_form.addRow(self._axis_row_label, self._axis_combo)
 
         self._special_group.setVisible(False)
         layout.addWidget(self._special_group)
@@ -208,6 +224,8 @@ class ParamFormWidget(QWidget):
 
         # 连接 R 变化以实时更新近断层系数标签
         self._r_spin.valueChanged.connect(self._update_nf_factor_label)
+        # 初始化目标谱来源相关控件显隐
+        self._on_spectrum_source_changed()
 
     # ── 类型切换 ──
 
@@ -239,6 +257,18 @@ class ParamFormWidget(QWidget):
         self._run_btn.setText(f"生成 {label}")
         self.type_changed.emit(index)
 
+    def _on_spectrum_source_changed(self, index=None):
+        """切换目标谱来源：规范设计谱显示近场系数，GMPE 情景谱显示分区/椭圆轴。"""
+        is_gmpe = self._spectrum_source_combo.currentIndex() == 1
+        self._nf_factor_row_label.setVisible(not is_gmpe)
+        self._nf_factor_label.setVisible(not is_gmpe)
+        self._region_row_label.setVisible(is_gmpe)
+        self._region_combo.setVisible(is_gmpe)
+        self._axis_row_label.setVisible(is_gmpe)
+        self._axis_combo.setVisible(is_gmpe)
+        if not is_gmpe:
+            self._update_nf_factor_label()
+
     def _update_nf_factor_label(self):
         """刷新近断层放大系数标签（GB50011-2010 §3.10 + 附录L）。"""
         label = GM_TYPE_LABELS[self._type_combo.currentIndex()]
@@ -260,6 +290,7 @@ class ParamFormWidget(QWidget):
                 factor = 1.0
                 desc = f"×1.0 (R={R:.1f} > 10km)"
         self._nf_factor_label.setText(desc)
+
 
 
     def _on_duration_changed(self, value):
@@ -292,6 +323,8 @@ class ParamFormWidget(QWidget):
             'type_label': self._type_combo.currentText(),
             'type_code': GM_TYPE_CODES[self._type_combo.currentText()],
             'spectrum_source': spectrum_source,
+            'region': self._region_combo.currentText(),   # 第五代区划分区（中文，适配器接受）
+            'axis': self._axis_combo.currentText(),        # 长轴/短轴
             'Mw': self._mw_spin.value(),
             'R': self._r_spin.value(),
             'Vs30': self._vs30_spin.value(),

@@ -497,6 +497,7 @@ class SpecialGroundMotionWorker(BaseWorker):
                  fault_type="strike_slip", n=4096, dt=0.02,
                  zeta=0.05, tol=0.05, max_iter=50, fm=0,
                  spectrum_source="code", code_periods=None, code_sa=None,
+                 region="东部强震区", axis="长轴",
                  parent=None, job_id=None):
         super().__init__(parent, job_id=job_id)
         self._gm_type = gm_type
@@ -513,6 +514,8 @@ class SpecialGroundMotionWorker(BaseWorker):
         self._spectrum_source = spectrum_source
         self._code_periods = code_periods
         self._code_sa = code_sa
+        self._region = region
+        self._axis = axis
 
     def execute(self):
         from seiswave.core.generator import create_ground_motion
@@ -546,6 +549,8 @@ class SpecialGroundMotionWorker(BaseWorker):
             spectrum_source=self._spectrum_source,
             code_periods=self._code_periods,
             code_sa=self._code_sa,
+            region=self._region,
+            axis=self._axis,
             progress_callback=progress_cb,
         )
         acc = getattr(result, 'acc', None)

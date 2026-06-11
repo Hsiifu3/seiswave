@@ -126,6 +126,8 @@ class GeneratorController(QObject):
             spectrum_source=params.get('spectrum_source', 'code'),
             code_periods=code_periods,
             code_sa=code_sa,
+            region=params.get('region', '东部强震区'),
+            axis=params.get('axis', '长轴'),
             parent=self,
             job_id=self._job_id,
         )

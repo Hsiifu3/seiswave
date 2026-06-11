@@ -330,6 +330,105 @@ class GMPEAdapter:
         )
 
 
+# ──────────────────── 中国 GMPE：第五代区划图（GB18306-2015）────────────────────
+
+# 俞言祥《新一代地震区划图地震动参数衰减关系的建立与特点分析》表4/表5。
+# 模型（震级分段，界 M=6.5）：lg Y = A + B·M + C·lg(R + D·e^(E·M))
+#   Y = aE（峰值加速度，gal）或 nE（拟速度平台值/2.5，cm/s）
+#   M = 面波震级 Ms；R = 震中距(km)
+# 由 aE/nE 构造 GB 设计谱：平台 αmax = 2.5·aE/g，特征周期 Tg = 2π·nE/aE。
+# 每项系数 = (A_low, B_low, A_high, B_high, C, D, E)，D/E 在 aE 与 nE 间共用。
+_GB18306_AE = {
+    ("east_strong", "major"): (1.979, 0.671, 3.533, 0.432, -2.315, 2.088, 0.399),
+    ("east_strong", "minor"): (1.176, 0.660, 2.753, 0.418, -2.004, 0.944, 0.447),
+    ("moderate",    "major"): (2.417, 0.498, 3.706, 0.298, -2.079, 2.802, 0.295),
+    ("moderate",    "minor"): (1.715, 0.471, 2.690, 0.321, -1.723, 1.295, 0.331),
+    ("xinjiang",    "major"): (1.791, 0.720, 3.403, 0.472, -2.389, 1.772, 0.424),
+    ("xinjiang",    "minor"): (0.983, 0.713, 2.610, 0.463, -2.118, 0.825, 0.465),
+    ("tibet",       "major"): (2.387, 0.645, 3.807, 0.411, -2.416, 2.647, 0.366),
+    ("tibet",       "minor"): (1.003, 0.609, 2.457, 0.388, -1.854, 0.612, 0.457),
+}
+_GB18306_NE = {
+    ("east_strong", "major"): (-0.363, 0.791, 1.437, 0.513, -2.103, 2.088, 0.399),
+    ("east_strong", "minor"): (-1.147, 0.788, 0.712, 0.502, -1.825, 0.944, 0.447),
+    ("moderate",    "major"): (0.093, 0.621, 1.640, 0.382, -1.889, 2.802, 0.295),
+    ("moderate",    "minor"): (-0.589, 0.601, 0.671, 0.407, -1.559, 1.295, 0.331),
+    ("xinjiang",    "major"): (-0.547, 0.840, 1.310, 0.554, -2.181, 1.772, 0.424),
+    ("xinjiang",    "minor"): (-1.351, 0.843, 0.569, 0.549, -1.945, 0.825, 0.465),
+    ("tibet",       "major"): (-0.064, 0.766, 1.714, 0.491, -2.205, 2.647, 0.366),
+    ("tibet",       "minor"): (-1.301, 0.741, 0.443, 0.474, -1.696, 0.612, 0.457),
+}
+
+# 分区名归一化（接受中文/英文/别名）
+_GB18306_REGION_ALIASES = {
+    "east_strong": "east_strong", "东部强震区": "east_strong", "east": "east_strong",
+    "moderate": "moderate", "中强地震区": "moderate", "中强": "moderate",
+    "xinjiang": "xinjiang", "新疆区": "xinjiang", "新疆": "xinjiang",
+    "tibet": "tibet", "青藏区": "tibet", "青藏": "tibet",
+}
+_GB18306_AXIS_ALIASES = {
+    "major": "major", "长轴": "major", "长": "major",
+    "minor": "minor", "短轴": "minor", "短": "minor",
+}
+
+_G_CM_S2 = 980.665  # 1g = 980.665 cm/s²
+_BETA_MAX = 2.5     # GB18306 动力放大系数（aE = 平台值/2.5）
+
+
+class ChinaGMPEAdapter:
+    """中国地震动衰减关系（第五代区划图 GB18306-2015，俞言祥分区模型）。
+
+    产出与 GB50011/GB18306 设计谱一致的反应谱：由分区衰减得到峰值加速度 aE
+    与速度参数 nE，构造平台 αmax=2.5·aE/g、特征周期 Tg=2π·nE/aE 的 GB 设计谱。
+    适用：M=4.5~8.0（中强地震区 4.5~7.0），R=0~200km。
+    """
+
+    REGIONS = ("east_strong", "moderate", "xinjiang", "tibet")
+    AXES = ("major", "minor")
+
+    @staticmethod
+    def _norm_region(region):
+        return _GB18306_REGION_ALIASES.get(str(region), "east_strong")
+
+    @staticmethod
+    def _norm_axis(axis):
+        return _GB18306_AXIS_ALIASES.get(str(axis), "major")
+
+    @staticmethod
+    def _attenuate(coef, M, R):
+        """lg Y = A + B·M + C·lg(R + D·e^(E·M))，返回 Y（gal 或 cm/s）。"""
+        a_lo, b_lo, a_hi, b_hi, c, d, e = coef
+        A, B = (a_lo, b_lo) if M <= 6.5 else (a_hi, b_hi)
+        lg_y = A + B * M + c * np.log10(R + d * np.exp(e * M))
+        return 10.0 ** lg_y
+
+    @classmethod
+    def compute_params(cls, Mw, R, region="east_strong", axis="major"):
+        """返回 (PGA_g, alpha_max_g, Tg_s) — GB 设计谱构造参数。"""
+        region = cls._norm_region(region)
+        axis = cls._norm_axis(axis)
+        M = float(Mw)
+        R = max(float(R), 0.0)
+        aE = cls._attenuate(_GB18306_AE[(region, axis)], M, R)   # gal
+        nE = cls._attenuate(_GB18306_NE[(region, axis)], M, R)   # cm/s
+        pga_g = aE / _G_CM_S2
+        alpha_max = _BETA_MAX * aE / _G_CM_S2                     # 平台 Sa/g
+        Tg = (2.0 * np.pi * nE / aE) if aE > 1e-12 else 0.4
+        return pga_g, alpha_max, Tg
+
+    @classmethod
+    def compute_spectrum(cls, Mw, R, region="east_strong", axis="major",
+                         periods=None, zeta=0.05, **kwargs):
+        """计算第五代区划情景 GB 设计谱，返回 (periods, Sa[g])。"""
+        from .code_spec import CodeSpectrum
+        pga_g, alpha_max, Tg = cls.compute_params(Mw, R, region, axis)
+        if periods is None:
+            periods = np.geomspace(0.01, 6.0, 300)
+        periods = np.asarray(periods, dtype=np.float64)
+        sa = CodeSpectrum.gb50011(periods, Tg, alpha_max, zeta=zeta)
+        return periods, sa
+
+
 # ──────────────────── 预设标准参数集（FEMA P695 典型场景） ────────────────────
 
 @dataclass
