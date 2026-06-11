@@ -386,6 +386,7 @@ class ResidualSpectrum:
                 tol=tol,
                 max_iter=max_iter,
                 fm=fm,
+                n_trials=1,
                 envelope_values=envelope_values,
             )
             residual_acc = np.asarray(residual_signal.acc, dtype=np.float64)

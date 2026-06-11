@@ -1751,6 +1751,7 @@ class FarFieldGenerator:
             target_spectrum=target_sa, periods=periods,
             n=n, dt=dt, zeta=zeta, pga=pga,
             tol=tol, max_iter=max_iter, fm=fm,
+            n_trials=1,  # 情景波单次实现即可，避免 3 个随机重启拖慢
             progress_callback=progress_callback,
             envelope_values=envelope_values,
         )
@@ -1795,6 +1796,7 @@ class NearFieldNoPulseGenerator:
             target_spectrum=target_sa, periods=periods,
             n=n, dt=dt, zeta=zeta, pga=pga,
             tol=tol, max_iter=max_iter, fm=fm,
+            n_trials=1,  # 情景波单次实现即可，避免 3 个随机重启拖慢
             progress_callback=progress_callback,
             envelope_values=envelope_values,
         )
@@ -1859,6 +1861,7 @@ class NearFieldPulseGenerator:
             target_spectrum=total_sa, periods=periods,
             n=n, dt=dt, zeta=zeta, pga=pga,
             tol=tol, max_iter=max_iter, fm=0,
+            n_trials=1,
             progress_callback=progress_callback,
         )
 
@@ -1895,7 +1898,9 @@ class NearFieldPulseGenerator:
                 n=n,
                 tol=tol,
                 max_iter=max_iter,
-                fm=fm,
+                # 残差分解固定用快速频域法（fm=0）：这是内部分解步骤，无需慢速时域
+                # line-search 匹配；否则 NFP 在 5× sf 候选上会非常慢（界面卡在100%）。
+                fm=0,
                 correct_combined=False,
                 envelope_values=envelope_values,
             )
