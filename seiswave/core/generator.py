@@ -1960,6 +1960,10 @@ class NearFieldPulseGenerator:
         residual_sig.a2vd()
         residual_metrics = BakerPulseDetector.analyze(residual_sig.vel * 980.0, dt)
         pulse_scale = float(best_sf * best_residual_result.scaling_factor)
+        # 脉冲速度 = 实际进入信号的脉冲分量(pulse_acc)的积分，与 sig.vel 同单位(g·s)，
+        # 绘图时 ×980 得 cm/s。避免旧式 pulse_vel_cm*scale/100 的单位错误(放大~9.8倍)。
+        pulse_sig = EQSig(pulse_acc, dt, name="pulse")
+        pulse_sig.a2vd()
 
         best_sig.name = f"NFP_M{Mw:.1f}_R{R:.1f}"
         best_sig.near_field_factor = factor
@@ -1967,7 +1971,7 @@ class NearFieldPulseGenerator:
         best_sig.pulse_params = pulse_params
         best_sig.pulse_metrics = best_metrics
         best_sig.pulse_acc = pulse_acc
-        best_sig.pulse_vel = pulse_vel_cm * pulse_scale / 100.0
+        best_sig.pulse_vel = pulse_sig.vel
         best_sig.residual_acc = residual_acc
         best_sig.residual_has_pulse = residual_metrics["has_pulse"]
         best_sig.residual_pulse_metrics = residual_metrics
