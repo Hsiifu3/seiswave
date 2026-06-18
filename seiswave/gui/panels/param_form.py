@@ -118,6 +118,17 @@ class ParamFormWidget(QWidget):
         self._axis_row_label = QLabel("椭圆轴:")
         special_form.addRow(self._axis_row_label, self._axis_combo)
 
+        # NFP 引导提示：近场脉冲是罕遇/大震近场现象，弱目标谱下脉冲会很弱
+        self._nfp_hint_label = QLabel(
+            "⚠ 近场脉冲为罕遇/大震近场现象。建议左侧「地震水准」选『罕遇地震』，"
+            "或目标谱来源用『GMPE 情景谱(近场 R≤10km)』，否则速度脉冲会很弱。")
+        self._nfp_hint_label.setWordWrap(True)
+        self._nfp_hint_label.setStyleSheet(
+            "color: #b26a00; font-size: 11px; background: #fff8e1;"
+            " border: 1px solid #ffe0a3; border-radius: 4px; padding: 4px;")
+        self._nfp_hint_label.setVisible(False)
+        special_form.addRow(self._nfp_hint_label)
+
         self._special_group.setVisible(False)
         layout.addWidget(self._special_group)
 
@@ -251,6 +262,9 @@ class ParamFormWidget(QWidget):
 
         # 刷新近断层系数标签
         self._update_nf_factor_label()
+
+        # NFP 引导提示仅在近场脉冲类型显示
+        self._nfp_hint_label.setVisible(is_nfp)
 
         self._pga_spin.setEnabled(False)
         self._pga_spin.setToolTip("由当前目标谱自动确定")
