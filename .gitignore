@@ -9,3 +9,6 @@ build/
 data/peer_nga/
 *.egg-info/
 dist/
+
+# 可视化 brainstorm 临时文件
+.superpowers/
