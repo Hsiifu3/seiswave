@@ -32,6 +32,7 @@ from .pulse import (
     BakerPulseDetector,
     create_pulse,
 )
+from .spectral_match import match_to_target
 
 def __getattr__(name):
     if name == 'Response':
@@ -84,4 +85,5 @@ __all__ = [
     'PulseWavelet',
     'BakerPulseDetector',
     'create_pulse',
+    'match_to_target',
 ]

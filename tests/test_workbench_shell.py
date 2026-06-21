@@ -101,7 +101,9 @@ class TestWorkbenchShell:
 
             metrics = window._preview_panel._scorecard.metrics()
             sig = EQSignal(selected.acc, selected.dt, name=selected.name)
-            expected_arias = float(sig.arias_intensity()[-1])
+            # 记分卡 Arias 以 m/s 显示：acc 由 g 换算为 m/s² 后积分
+            sig_si = EQSignal(selected.acc * 9.80665, selected.dt, name=selected.name)
+            expected_arias = float(sig_si.arias_intensity()[-1])
 
             assert metrics["mean_error_pct"] == pytest.approx(0.0, abs=1e-8)
             assert metrics["pga"] == pytest.approx(np.max(np.abs(selected.acc)))

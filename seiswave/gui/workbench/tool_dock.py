@@ -6,6 +6,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QGroupBox,
     QLabel,
+    QMessageBox,
     QPushButton,
     QStackedWidget,
     QVBoxLayout,
@@ -16,6 +17,7 @@ from seiswave.core.signal_pool import SignalPool
 from seiswave.core.target_spectrum import TargetSpectrumService
 
 from .preview_panel import PreviewPanel
+from .tool_worker import ToolJobWorker
 from .tools import (
     ArtificialTool,
     AutoSelectTool,
@@ -33,6 +35,8 @@ class ToolDock(QWidget):
     """按当前工具切换参数面板，并常驻快捷出图/导出。"""
 
     message_requested = Signal(str)
+    progress_changed = Signal(int, str)
+    run_state_changed = Signal(bool)
 
     def __init__(
         self,
@@ -52,6 +56,7 @@ class ToolDock(QWidget):
         self._run_button: QPushButton | None = None
         self._plot_export_tool: PlotExportTool | None = None
         self._data_export_tool: DataExportTool | None = None
+        self._active_worker: ToolJobWorker | None = None
         self._setup_ui()
         self._register_tools()
         self.set_current_tool(self._current_tool)
@@ -152,6 +157,9 @@ class ToolDock(QWidget):
 
     def set_current_tool(self, tool_name: str) -> None:
         """切换右栏工具内容。"""
+        if self._active_worker is not None and tool_name != self._current_tool:
+            self.message_requested.emit("有任务正在运行，请先等待或取消")
+            return
         widget = self._tool_widgets.get(tool_name)
         if widget is None:
             tool_name = "导入"
@@ -168,10 +176,69 @@ class ToolDock(QWidget):
             self._run_button.setEnabled(bool(supports_run))
 
     def _run_current_tool(self) -> object | None:
+        # 运行中点击 = 取消
+        if self._active_worker is not None:
+            self._active_worker.cancel()
+            self.message_requested.emit("正在取消…")
+            return None
+
         widget = self._tool_widgets.get(self._current_tool)
         if widget is None:
             return None
-        return getattr(widget, "run_tool")()
+
+        job = getattr(widget, "build_job", lambda: None)()
+        if job is None:
+            # 廉价工具：GUI 线程同步执行（run_tool 内部已各自兜底异常）
+            return getattr(widget, "run_tool")()
+
+        compute, finalize = job
+        self._start_worker(compute, finalize)
+        return None
+
+    def _start_worker(self, compute, finalize) -> None:
+        tool_name = self._current_tool
+        worker = ToolJobWorker(compute)
+        self._active_worker = worker
+        worker.signals.progress.connect(
+            lambda pct, text: self.progress_changed.emit(pct, text or "处理中…")
+        )
+        worker.signals.finished.connect(
+            lambda payload: self._on_worker_finished(tool_name, finalize, payload)
+        )
+        worker.signals.error.connect(
+            lambda message: self._on_worker_error(tool_name, message)
+        )
+        worker.finished.connect(worker.deleteLater)
+        self._set_running(True, tool_name)
+        worker.start()
+
+    def _on_worker_finished(self, tool_name: str, finalize, payload) -> None:
+        self._set_running(False, tool_name)
+        try:
+            finalize(payload)
+        except Exception as exc:  # finalize 在 GUI 线程，安全弹窗
+            QMessageBox.critical(self, tool_name, str(exc))
+
+    def _on_worker_error(self, tool_name: str, message: str) -> None:
+        self._set_running(False, tool_name)
+        if message == "用户取消":
+            self.message_requested.emit(f"{tool_name} 已取消")
+            return
+        QMessageBox.critical(self, tool_name, message)
+
+    def _set_running(self, running: bool, tool_name: str) -> None:
+        if not running:
+            self._active_worker = None
+        if self._run_button is not None:
+            if running:
+                self._run_button.setText("■ 取消")
+            else:
+                widget = self._tool_widgets.get(tool_name)
+                run_label = getattr(widget, "run_label", lambda: "▶ 运行")()
+                self._run_button.setText(run_label)
+        self.run_state_changed.emit(running)
+        if not running:
+            self.progress_changed.emit(0, "空闲")
 
     def state(self) -> dict[str, object]:
         """返回可序列化的右栏状态。"""

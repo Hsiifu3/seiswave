@@ -5,24 +5,34 @@
 - GitHub: https://github.com/Hsiifu3/seiswave
 - 工匠代理: Codex
 - 创建日期: 2026-02-12
-- 最后更新: 2026-06-21 15:37:57
+- 最后更新: 2026-06-21 16:54:04
 
 ## 当前状态
 - 版本: v2.0.2
 - 分支: feature/workbench
-- 总体进度: █████████████ 100%（工作台 Phase 3 全部完成，右栏 9 工具与核心谱拟合抽出已闭环）
-- 健康度: 🟢 健康（Phase 3 第二批工具、`spectral_match` 黄金值回归与 core/gmpe/ff_nf/special_code 回归均通过）
+- 总体进度: █████████████ 100%（工作台 Phase 5 完成，工作台已成为唯一 GUI 入口）
+- 健康度: 🟢 健康（Phase 4/5 完成；工作台入口、全量回归与旧向导退役均已确认）
 - 覆盖率（主代码口径）: **93%**（6625 行中 435 行未覆盖）
 - Feature-001: ✅ 已闭环，主链路稳定
 - GUI重构: ✅ GeneratorPanel 三栏响应式布局完成，相关回归已长期稳定
-- 工作台重构: ✅ Phase 3 全部完成（自动选波 / 人工波生成 / 独立谱拟合 / 组合校核已落地）
+- 工作台重构: ✅ Phase 5 全部完成（跨平台入口/打包配置、旧向导退役、全量回归完成）
 - 测试补强: ✅ 本轮已完成一轮高价值 coverage 冲刺，重点补强 `io / workers / import / result / selector / generator helpers`
 - 覆盖率口径: ✅ 已固化 `.coveragerc`，排除 `gui_backup_20250215` / `gui.bak` 等备份目录污染
 - 单测速度: 90s（从上一轮 126s 优化）
-- **最新测试确认**: 2026-05-25 全量回归 `695 passed, 0 failed, 0 warning`，耗时 90.04s
-- **本轮验证**: 2026-06-21 Phase 3 第二批工具与 `spectral_match` 抽出回归 `142 passed`；工作台主壳回归 `4 passed`（沿用既有 generator warnings，未在本 Phase 处理）
+- **最新测试确认**: 2026-06-21 全量回归 `1184 passed, 84 skipped`，耗时 `775.29s`；离屏入口 `python -m seiswave` 启动成功
+- **本轮验证**: 2026-06-21 Phase 4/5 回归：字体/打包/工作台壳 smoke `13 passed`；受影响面回归 `100 passed`；全量 `tests/` 绿（仍有既有 generator / spectral_match warnings）
 
 ## 已完成
+- [x] SeisWave 工作台重构 Phase 4 / Phase 5（2026-06-21）：
+  - `seiswave/__main__.py` 已切换到 `gui/workbench/app_window.AppWindow`，新增 `SEISWAVE_AUTO_QUIT_MS` 以支持离屏启动烟测；`python -m seiswave` 在 `QT_QPA_PLATFORM=offscreen` 下启动成功
+  - `seiswave/gui/fonts.py` 改为按平台 + 已安装字体回退：Windows 优先 `SimSun`、macOS 优先 `Songti SC`、其他平台回退 `Noto`；Matplotlib / Qt 统一走同一字体决策链
+  - `build.spec` 重写为工作台入口，补齐 workbench / tool hidden imports、数据文件收集与 Windows / macOS 平台图标分支；新增 `tests/test_build_spec_smoke.py` 做离线 spec 执行烟测
+  - 校准 `requirements.txt`，新增 `run.sh` / `run.bat`，并把 `setup.py` README 读取切到 `pathlib`
+  - 退役旧向导：删除 `seiswave/gui/main_window.py`、整个 `seiswave/gui/panels/`、`seiswave/gui.bak/`、`seiswave/gui_backup_20250215/`
+  - 清理/迁移旧 GUI 测试：删除 `test_gui_main_window_smoke.py`、`test_gui_generator_*`、`test_signal_panel_more.py`、`test_result_panel_more.py` 等；保留并改造 widgets / workers / residual / e2e / workbench 回归
+  - `tests/conftest.py` 现会忽略未纳入 git 的实验脚本，并把 `tests/test_fortran.py` 这类人工诊断脚本移出稳定回归集合
+  - 更新 `README.md` 入口说明与项目结构，明确工作台为唯一 GUI 入口
+  - 验证：离屏入口成功；`tests/test_fonts.py + tests/test_build_spec_smoke.py + tests/test_workbench_shell.py` `13 passed`；受影响面回归 `100 passed`；全量 `pytest tests/` `1184 passed, 84 skipped`
 - [x] SeisWave 工作台重构 Phase 3（第二批工具 + `spectral_match` 抽出，2026-06-21）：
   - 新增 `seiswave/core/spectral_match.py::match_to_target()`，把 `generator.py::_adjustspectra_atik` 独立抽出为可复用核心匹配函数
   - `WaveGenerator._adjustspectra_atik()` 改为委托新核心实现，保持既有数值行为不变
@@ -124,7 +134,6 @@
   - 手动验证：窗口 1200x800、左栏可滚动无溢出、中间谱图 ≥500px、NFP 右栏脉冲参数显示、三类地震动 UI 不闪退
 
 ## 进行中
-- [x] SeisWave 工作台重构 Phase 3-5（自动选波 / 人工波生成 / `spectral_match` 抽出与独立谱拟合 / 组合校核）
 - [x] 异步文件加载验收（用户测试）
 - [x] 性能基准测试
 - [x] `generator.py` coverage 冲刺完成：从 86% → 99%
@@ -151,6 +160,9 @@
 ## 会话历史（最近5次）
 | 日期 | 工匠 | 任务 | 结果 | 耗时 |
 |------|------|------|------|------|
+| 2026-06-21 | codex | Phase 4/5 完成：工作台成为唯一入口，旧向导退役，全量回归通过 | done | - |
+| 2026-06-21 | codex | Phase 4/5 完成：工作台入口切换、跨平台 spec/字体/启动脚本、旧向导退役、全量回归 | done | 离屏入口成功；`1184 passed, 84 skipped` |
+| 2026-06-21 | codex | 当前环境缺少 PyInstaller，先以离线 spec 烟测 + 全量回归继续推进 Phase 4/5 | blocked | - |
 | 2026-06-21 | codex | Phase 3 第二批完成：自动选波/人工波/谱拟合/组合校核 + `spectral_match` 抽出 | done | 新增与核心相关回归 `142 passed`；工作台主壳 `4 passed` |
 | 2026-06-21 | codex | Phase 3首批右栏工具完成：反应谱/导入/出图/导出/基线滤波 | wip | - |
 | 2026-06-21 | codex | Phase 3 首批右栏工具：反应谱/导入/出图/导出/基线滤波 | in-progress | 新增离屏测试 `5 passed`；工具+主壳 `9 passed`；Phase 1/2 + `response/gmpe/ff_nf` 回归 `118 passed` |

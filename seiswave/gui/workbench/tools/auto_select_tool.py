@@ -184,59 +184,153 @@ class AutoSelectTool(ToolWidget):
             self._path_edit.setText(path)
 
     def run_tool(self) -> list[SignalRecord]:
+        prepared = self._prepare()
+        if prepared is None:
+            return []
         try:
-            target = target_or_warn(self, self._target_service, "自动选波")
-            if target is None:
-                return []
-            periods, target_sa = target
-            database, source_label = self._build_database(periods)
-            selector = WaveSelector(self._build_config(periods, target_sa))
-            results = selector.select(database)
-            if not results:
-                raise ValueError("当前条件下未筛选到可用天然波")
-
-            records = self._materialize_results(results, database, source_label)
-            self._pool.set_selection([record.id for record in records])
-            self._notify(f"自动选波完成，已入池 {len(records)} 条天然波")
-            return records
+            payload = self._compute(prepared, lambda *_: None, lambda: False)
+            return self._finalize(payload)
         except Exception as exc:
             QMessageBox.critical(self, "自动选波", str(exc))
             return []
 
-    def _build_database(self, periods: np.ndarray):
-        assert self._source_combo is not None
-        source = str(self._source_combo.currentData())
-        if source == "peer":
-            return self._load_peer_database(periods), "peer"
-        return self._load_pool_database(periods), "pool"
+    def build_job(self):
+        prepared = self._prepare()
+        if prepared is None:
+            return None
+        compute = lambda progress, is_cancelled: self._compute(prepared, progress, is_cancelled)
+        return compute, self._finalize
 
-    def _load_peer_database(self, periods: np.ndarray) -> PeerDatabase:
+    def _prepare(self):
+        """GUI 线程：校验目标谱、快照配置与候选记录。"""
+        assert self._source_combo is not None
         assert self._path_edit is not None
-        path = Path(self._path_edit.text().strip()).expanduser()
-        if not path.exists():
+        assert self._mw_spin is not None
+        assert self._r_spin is not None
+        assert self._vs30_spin is not None
+        target = target_or_warn(self, self._target_service, "自动选波")
+        if target is None:
+            return None
+        periods, target_sa = target
+        source = str(self._source_combo.currentData())
+        ctx = {
+            "periods": np.asarray(periods, dtype=np.float64),
+            "config": self._build_config(periods, target_sa),
+            "source": source,
+            "peer_path": self._path_edit.text().strip(),
+            "zeta": self._target_service.zeta(),
+            "scenario": {
+                "Mw": float(self._mw_spin.value()),
+                "R": float(self._r_spin.value()),
+                "Vs30": float(self._vs30_spin.value()),
+            },
+        }
+        if source != "peer":
+            source_records = [
+                record
+                for record in (self._pool.selection() or self._pool.all())
+                if record.kind != "artificial"
+                and record.meta.get("operation") != "auto_select"
+            ]
+            if not source_records:
+                QMessageBox.warning(self, "自动选波", "当前没有可作为候选的已导入天然波")
+                return None
+            ctx["source_records"] = source_records
+        return ctx
+
+    def _compute(self, ctx, progress_cb, is_cancelled):
+        periods = ctx["periods"]
+        if ctx["source"] == "peer":
+            database = self._load_peer_database(
+                ctx["peer_path"], periods, ctx["zeta"], progress_cb, is_cancelled
+            )
+            source_label = "peer"
+        else:
+            progress_cb(20, "计算候选反应谱…")
+            database = self._build_pool_database(ctx["source_records"], periods, ctx["zeta"])
+            source_label = "pool"
+
+        if is_cancelled():
+            raise InterruptedError("用户取消")
+        progress_cb(70, "谱型匹配筛选…")
+
+        def _sel_progress(done, total):
+            if is_cancelled():
+                raise InterruptedError("用户取消")
+            frac = 70 + (done / max(total, 1)) * 25
+            progress_cb(int(frac), f"筛选 {done}/{total}")
+
+        selector = WaveSelector(ctx["config"])
+        try:
+            results = selector.select(database, progress_cb=_sel_progress)
+        except TypeError:
+            results = selector.select(database)
+        if not results:
+            raise ValueError("当前条件下未筛选到可用天然波")
+
+        progress_cb(96, "载入波形…")
+        specs = self._build_specs(results, database, source_label, ctx["scenario"])
+        return {"specs": specs}
+
+    def _finalize(self, payload) -> list[SignalRecord]:
+        created: list[SignalRecord] = []
+        for spec in payload["specs"]:
+            if spec["source_record"] is not None:
+                child = self._pool.derive(
+                    spec["source_record"],
+                    spec["acc"],
+                    "自动选波",
+                    kind="natural",
+                    meta=spec["meta"],
+                )
+            else:
+                child = SignalRecord(
+                    acc=np.asarray(spec["acc"], dtype=np.float64).copy(),
+                    dt=float(spec["dt"]),
+                    name=spec["name"],
+                    kind="natural",
+                    meta=spec["meta"],
+                )
+                self._pool.add(child)
+            created.append(child)
+        self._pool.set_selection([record.id for record in created])
+        self._notify(f"自动选波完成，已入池 {len(created)} 条天然波")
+        return created
+
+    def _load_peer_database(
+        self, peer_path, periods, zeta, progress_cb, is_cancelled
+    ) -> PeerDatabase:
+        path = Path(str(peer_path)).expanduser()
+        if not str(peer_path).strip() or not path.exists():
             raise FileNotFoundError(f"PEER 目录不存在: {path}")
 
+        progress_cb(5, "加载 PEER 索引…")
         database = PeerDatabase(str(path))
         if not database.load_index():
+            progress_cb(10, "构建 PEER 索引…")
             database.build_index()
             database.save_index()
+        if is_cancelled():
+            raise InterruptedError("用户取消")
 
-        zeta = self._target_service.zeta()
         if not database.load_spectra_cache(zeta):
-            database.precompute_spectra(np.asarray(periods, dtype=np.float64), zeta=zeta)
+            def _pre(done, total):
+                if is_cancelled():
+                    raise InterruptedError("用户取消")
+                frac = 15 + (done / max(total, 1)) * 50
+                progress_cb(int(frac), f"预算反应谱 {done}/{total}")
+
+            try:
+                database.precompute_spectra(
+                    np.asarray(periods, dtype=np.float64), zeta=zeta, progress_cb=_pre
+                )
+            except TypeError:
+                database.precompute_spectra(
+                    np.asarray(periods, dtype=np.float64), zeta=zeta
+                )
         return database
 
-    def _load_pool_database(self, periods: np.ndarray):
-        source_records = [
-            record
-            for record in (self._pool.selection() or self._pool.all())
-            if record.kind != "artificial"
-            and record.meta.get("operation") != "auto_select"
-        ]
-        if not source_records:
-            raise ValueError("当前没有可作为候选的已导入天然波")
-
-        zeta = self._target_service.zeta()
+    def _build_pool_database(self, source_records, periods: np.ndarray, zeta):
         candidates: list[_PoolCandidate] = []
         for index, record in enumerate(source_records, start=1):
             acc = np.asarray(record.acc, dtype=np.float64)
@@ -294,38 +388,32 @@ class AutoSelectTool(ToolWidget):
             ),
         )
 
-    def _materialize_results(
+    def _build_specs(
         self,
         results,
         database,
         source_label: str,
-    ) -> list[SignalRecord]:
-        created: list[SignalRecord] = []
+        scenario: dict,
+    ) -> list[dict]:
+        """worker 线程：载入波形并组装入池规格，不触碰 SignalPool。"""
+        specs: list[dict] = []
         for index, result in enumerate(results, start=1):
             rec = result.record
-            meta = self._result_meta(result, source_label)
+            meta = self._result_meta(result, source_label, scenario)
             acc = database.load_waveform(rec) * float(result.scale_factor)
-
+            source_record = None
             if source_label == "pool" and isinstance(database, _PoolCandidateDatabase):
                 source_record = database._lookup[rec.rsn]
-                child = self._pool.derive(
-                    source_record,
-                    acc,
-                    "自动选波",
-                    kind="natural",
-                    meta=meta,
-                )
-            else:
-                child = SignalRecord(
-                    acc=np.asarray(acc, dtype=np.float64).copy(),
-                    dt=float(rec.dt),
-                    name=self._peer_record_name(rec, index),
-                    kind="natural",
-                    meta=meta,
-                )
-                self._pool.add(child)
-            created.append(child)
-        return created
+            specs.append(
+                {
+                    "acc": np.asarray(acc, dtype=np.float64).copy(),
+                    "dt": float(rec.dt),
+                    "name": self._peer_record_name(rec, index),
+                    "meta": meta,
+                    "source_record": source_record,
+                }
+            )
+        return specs
 
     def _peer_record_name(self, record: PeerRecord, index: int) -> str:
         base = Path(record.filepath).stem if record.filepath else f"RSN{record.rsn}"
@@ -333,10 +421,7 @@ class AutoSelectTool(ToolWidget):
             return f"{base}_{record.event}"
         return f"{base}_{index}"
 
-    def _result_meta(self, result, source_label: str) -> dict[str, object]:
-        assert self._mw_spin is not None
-        assert self._r_spin is not None
-        assert self._vs30_spin is not None
+    def _result_meta(self, result, source_label: str, scenario: dict) -> dict[str, object]:
         return {
             "source": "auto_select",
             "operation": "auto_select",
@@ -348,9 +433,9 @@ class AutoSelectTool(ToolWidget):
             "scale_factor": float(result.scale_factor),
             "match_rmse": float(result.match_error),
             "deviations": {str(k): float(v) for k, v in result.deviations.items()},
-            "Mw": float(self._mw_spin.value()),
-            "R": float(self._r_spin.value()),
-            "Vs30": float(self._vs30_spin.value()),
+            "Mw": float(scenario["Mw"]),
+            "R": float(scenario["R"]),
+            "Vs30": float(scenario["Vs30"]),
             "target_source": self._target_service.source(),
             "target_description": self._target_service.describe(),
             "target_meta": self._target_service.meta(),

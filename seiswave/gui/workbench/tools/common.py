@@ -24,6 +24,17 @@ class ToolWidget(QWidget):
     def run_tool(self) -> object | None:
         raise NotImplementedError
 
+    def build_job(self):
+        """重工具覆写：返回 ``(compute, finalize)`` 以异步执行，或 ``None`` 走同步。
+
+        - 在本方法内（GUI 线程）完成校验，失败时弹警告并返回 ``None``；
+        - ``compute(progress_cb, is_cancelled)`` 在 worker 线程跑纯计算，返回 payload；
+        - ``finalize(payload)`` 回 GUI 线程写回 SignalPool 并返回结果。
+
+        默认返回 ``None``，由 ToolDock 退回同步调用 ``run_tool()``（廉价工具）。
+        """
+        return None
+
     def state(self) -> dict[str, object]:
         return {}
 

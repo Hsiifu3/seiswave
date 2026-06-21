@@ -57,9 +57,14 @@ EMPTY_METRICS = {
 
 
 def _record_metrics(record: SignalRecord) -> dict[str, float]:
-    sig = EQSignal(record.acc, record.dt, name=record.name)
-    arias = sig.arias_intensity()
+    # 本仓库加速度以 g 为单位；Arias 强度公式按 m/s² 定义，
+    # 故先把 acc 由 g 换算为 m/s² 再积分，使显示值真正为 m/s。
+    gravity = 9.80665
+    acc_si = np.asarray(record.acc, dtype=np.float64) * gravity
+    sig_si = EQSignal(acc_si, record.dt, name=record.name)
+    arias = sig_si.arias_intensity()
     arias_total = float(arias[-1]) if len(arias) else 0.0
+    sig = EQSignal(record.acc, record.dt, name=record.name)
     return {
         "pga": float(np.max(np.abs(record.acc))),
         "pgv": float(np.max(np.abs(record.vel()))),

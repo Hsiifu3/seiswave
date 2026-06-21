@@ -17,7 +17,7 @@ SeisWave is a Python toolkit for earthquake engineering, providing seismic signa
 - **地震波选取**：三步筛选（有效持时→主周期偏差→底部剪力校核），支持 SDOF/MDOF 分析
 - **人工波生成**：基于目标谱的迭代频域拟合算法（移植自 EQSignal C++ fitSP）
 - **FFT / PSD**：傅里叶振幅谱、Welch 功率谱密度、相位谱
-- **GUI 桌面应用**：PySide6 界面，含规范谱设置、数据导入、选波、人工波生成、信号处理、导出报告六大面板
+- **GUI 工作台**：PySide6 三栏工作台，统一接入导入、预览、自动选波、人工波生成、谱拟合、基线校正、滤波、组合校核与导出
 
 ---
 
@@ -102,10 +102,16 @@ wave = WaveGenerator.generate(
 ## GUI 启动 / Launch GUI
 
 ```bash
-# 方式一：模块启动 / Module entry
+# macOS / Linux（仓库内直接启动）
+./run.sh
+
+# Windows（仓库内直接启动）
+run.bat
+
+# 方式三：模块启动 / Module entry
 python -m seiswave
 
-# 方式二：命令行入口（安装后）/ Console entry (after install)
+# 方式四：命令行入口（安装后）/ Console entry (after install)
 seiswave
 ```
 
@@ -117,7 +123,7 @@ seiswave
 seiswave/
 ├── seiswave/
 │   ├── __init__.py          # 包入口，导出核心类
-│   ├── __main__.py          # GUI 启动入口
+│   ├── __main__.py          # 工作台启动入口
 │   ├── core/                # 核心计算库（无 GUI 依赖）
 │   │   ├── signal.py        # EQSignal 信号处理
 │   │   ├── spectrum.py      # Spectra 反应谱计算
@@ -129,14 +135,16 @@ seiswave/
 │   │   ├── response.py      # Response 结构响应分析
 │   │   └── io.py            # FileIO 文件读写
 │   └── gui/                 # PySide6 桌面应用
-│       ├── main_window.py   # 主窗口
-│       ├── styles.py        # 深色/浅色主题
-│       ├── workers.py       # 后台计算线程
-│       ├── panels/          # 功能面板
-│       └── widgets/         # 自定义控件
+│       ├── fonts.py         # 跨平台中英文字体封装
+│       ├── styles.py        # 工作台主题
+│       ├── workbench/       # 三栏工作台主壳与工具
+│       ├── workers.py       # 兼容保留的后台任务封装
+│       └── widgets/         # 通用绘图/表格控件
 ├── tests/                   # 单元测试
 ├── examples/                # 使用示例
 ├── matlab_ref/              # MATLAB 参考数据
+├── run.sh                   # macOS / Linux 启动脚本
+├── run.bat                  # Windows 启动脚本
 ├── setup.py
 └── README.md
 ```

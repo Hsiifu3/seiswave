@@ -24,6 +24,20 @@ from seiswave.gui.workbench.scorecard import compute_scorecard_metrics
 from .common import ensure_directory, selected_records_or_warn
 
 
+def _safe_stem(name: str) -> str:
+    """净化文件名干：替换路径分隔符、空白与中点等不便落盘的字符。"""
+    cleaned = []
+    for ch in str(name):
+        if ch in '/\\:*?"<>|':
+            cleaned.append("_")
+        elif ch.isspace() or ch == "·":
+            cleaned.append("_")
+        else:
+            cleaned.append(ch)
+    stem = "".join(cleaned).strip("._")
+    return stem or "export"
+
+
 class DataExportTool(QWidget):
     """Export time histories, spectra, and summary tables."""
 
@@ -133,7 +147,7 @@ class DataExportTool(QWidget):
         record,
     ) -> Path:
         values, label = self._series_values(record, content)
-        stem = f"{prefix}-{record.name or record.id}-{content}"
+        stem = _safe_stem(f"{prefix}-{record.name or record.id}-{content}")
         path = output_dir / f"{stem}.{format_name}"
 
         if format_name == "csv":
@@ -194,12 +208,18 @@ class DataExportTool(QWidget):
         if target_sa.size:
             columns["target_sa"] = target_sa
 
+        mean_spectra = snapshot.get("mean_spectra", {})
         for zeta in snapshot["zetas"]:
+            if float(zeta) not in mean_spectra:
+                continue  # 未选信号时只导出目标谱列，跳过缺失的均值谱
             suffix = f"{int(round(float(zeta) * 100)):02d}pct"
-            mean_spectrum = snapshot["mean_spectra"][float(zeta)]
+            mean_spectrum = mean_spectra[float(zeta)]
             columns[f"sa_{suffix}"] = np.asarray(mean_spectrum["sa"], dtype=np.float64)
             columns[f"sv_{suffix}"] = np.asarray(mean_spectrum["sv"], dtype=np.float64)
             columns[f"sd_{suffix}"] = np.asarray(mean_spectrum["sd"], dtype=np.float64)
+
+        if len(columns) == 1:  # 只有 period，没有任何谱数据
+            raise ValueError("当前无反应谱或目标谱可导出，请先选择信号或设置目标谱")
 
         path = output_dir / f"{prefix}-spectrum.{format_name}"
         if format_name == "csv":

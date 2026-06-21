@@ -1,77 +1,108 @@
-"""
-SeisWave 入口点
+"""SeisWave 入口点。"""
 
-python -m seiswave 启动 GUI 应用。
-"""
+from __future__ import annotations
 
-import sys
-import logging
-import traceback
 import faulthandler
+import logging
+import multiprocessing
+import os
+import sys
+import tempfile
+import traceback
+from collections.abc import Sequence
+from pathlib import Path
 
-# faulthandler 捕获 C 层 segfault
-_fault_log = open('/tmp/seiswave_fault.log', 'w')
+from seiswave.gui.fonts import qt_font, setup_matplotlib_fonts
+
+
+LOG_DIR = Path(tempfile.gettempdir())
+FAULT_LOG_PATH = LOG_DIR / "seiswave_fault.log"
+APP_LOG_PATH = LOG_DIR / "seiswave.log"
+
+_fault_log = FAULT_LOG_PATH.open("w", encoding="utf-8")
 faulthandler.enable(file=_fault_log, all_threads=True)
 
-# 配置日志到文件
 logging.basicConfig(
-    filename='/tmp/seiswave.log',
+    filename=str(APP_LOG_PATH),
     level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     force=True,
 )
-logger = logging.getLogger('seiswave')
+logger = logging.getLogger("seiswave")
 
-# 全局异常捕获
+
 def _excepthook(exc_type, exc_value, exc_tb):
-    msg = ''.join(traceback.format_exception(exc_type, exc_value, exc_tb))
-    logger.critical(f"Uncaught exception:\n{msg}")
+    """把未捕获异常写入启动日志。"""
+    msg = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+    logger.critical("Uncaught exception:\n%s", msg)
     sys.__excepthook__(exc_type, exc_value, exc_tb)
+
 
 sys.excepthook = _excepthook
 
 
-def main():
-    logger.info("SeisWave starting...")
-    import multiprocessing
-    multiprocessing.set_start_method('spawn', force=True)
+def _set_multiprocessing_mode() -> None:
+    """统一桌面入口的多进程启动方式。"""
+    try:
+        multiprocessing.set_start_method("spawn", force=True)
+    except RuntimeError:
+        logger.debug("Multiprocessing start method already initialized")
 
-    # Matplotlib 字体配置：中文宋体(Songti SC) + 英文 Times New Roman + 负号修复
-    import matplotlib
-    matplotlib.rcParams['font.family'] = ['Times New Roman', 'Songti SC']
-    matplotlib.rcParams['axes.unicode_minus'] = False
 
-    from PySide6.QtWidgets import QApplication
+def create_application(argv: Sequence[str] | None = None):
+    """创建或复用 QApplication，并应用全局字体/样式配置。"""
     from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication
 
-    # 高 DPI 支持
-    QApplication.setHighDpiScaleFactorRoundingPolicy(
-        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+    app = QApplication.instance()
+    if app is None:
+        QApplication.setHighDpiScaleFactorRoundingPolicy(
+            Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+        )
+        app = QApplication(list(argv or sys.argv))
 
-    app = QApplication(sys.argv)
     app.setApplicationName("SeisWave")
     app.setApplicationVersion("2.0.0")
     app.setOrganizationName("SeisWave")
+    app.setFont(qt_font())
+    return app
 
-    # 设置默认字体
-    from PySide6.QtGui import QFont
-    import platform
-    font = QFont()
-    if platform.system() == "Darwin":
-        font.setFamilies([".AppleSystemUIFont", "PingFang SC", "Helvetica Neue"])
-    elif platform.system() == "Windows":
-        font.setFamilies(["Microsoft YaHei UI", "Segoe UI"])
-    else:
-        font.setFamilies(["Noto Sans CJK SC", "sans-serif"])
-    font.setPointSize(13)
-    app.setFont(font)
 
-    from seiswave.gui.main_window import MainWindow
-    window = MainWindow()
+def create_main_window():
+    """创建 SeisWave 工作台主窗口。"""
+    from seiswave.gui.workbench.app_window import AppWindow
+
+    return AppWindow()
+
+
+def _configure_auto_quit(app) -> None:
+    """为离屏烟测提供自动退出钩子。"""
+    raw_value = os.environ.get("SEISWAVE_AUTO_QUIT_MS", "").strip()
+    if not raw_value:
+        return
+
+    try:
+        delay_ms = max(0, int(raw_value))
+    except ValueError:
+        logger.warning("Ignored invalid SEISWAVE_AUTO_QUIT_MS=%r", raw_value)
+        return
+
+    from PySide6.QtCore import QTimer
+
+    QTimer.singleShot(delay_ms, app.quit)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """启动 SeisWave 工作台。"""
+    logger.info("SeisWave starting...")
+    _set_multiprocessing_mode()
+    app = create_application(argv)
+    setup_matplotlib_fonts()
+    window = create_main_window()
     window.show()
-
-    sys.exit(app.exec())
+    _configure_auto_quit(app)
+    return app.exec()
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

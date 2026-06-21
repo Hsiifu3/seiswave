@@ -17,7 +17,6 @@ import numpy as np
 
 from seiswave.core.generator import WaveGenerator, create_ground_motion
 from seiswave.core.signal_pool import SignalRecord
-from seiswave.core.spectrum import Spectra
 
 from .common import ToolWidget, target_or_warn
 
@@ -192,42 +191,26 @@ class ArtificialTool(ToolWidget):
             self._fm_combo.setCurrentIndex(self._fm_combo.findData(0))
 
     def run_tool(self) -> list[SignalRecord]:
+        prepared = self._prepare()
+        if prepared is None:
+            return []
         try:
-            assert self._type_combo is not None
-            assert self._n_spin is not None
-            assert self._dt_spin is not None
-            assert self._zeta_spin is not None
-            assert self._tol_spin is not None
-            assert self._iter_spin is not None
-            assert self._trials_spin is not None
-            assert self._fm_combo is not None
-            gm_type = str(self._type_combo.currentData())
-
-            if gm_type == "general":
-                result = self._run_general()
-            else:
-                result = self._run_special(gm_type)
-
-            child = SignalRecord(
-                acc=np.asarray(result.acc, dtype=np.float64).copy(),
-                dt=float(result.dt),
-                name=result.name,
-                kind="artificial",
-                meta=self._build_meta(result, gm_type),
-            )
-            child_id = self._pool.add(child)
-            self._pool.set_selection([child_id])
-            self._notify(f"人工波生成完成，已入池 1 条 {result.name}")
-            return [child]
+            payload = self._compute(prepared, lambda *_: None, lambda: False)
+            return self._finalize(payload)
         except Exception as exc:
             QMessageBox.critical(self, "人工波生成", str(exc))
             return []
 
-    def _run_general(self):
-        target = target_or_warn(self, self._target_service, "人工波生成")
-        if target is None:
-            raise ValueError("当前未设置目标谱")
-        periods, target_sa = target
+    def build_job(self):
+        prepared = self._prepare()
+        if prepared is None:
+            return None
+        compute = lambda progress, is_cancelled: self._compute(prepared, progress, is_cancelled)
+        return compute, self._finalize
+
+    def _prepare(self):
+        """GUI 线程：快照参数 + 校验目标谱。"""
+        assert self._type_combo is not None
         assert self._n_spin is not None
         assert self._dt_spin is not None
         assert self._zeta_spin is not None
@@ -235,63 +218,105 @@ class ArtificialTool(ToolWidget):
         assert self._iter_spin is not None
         assert self._trials_spin is not None
         assert self._fm_combo is not None
-        sig = WaveGenerator.generate(
-            target_spectrum=np.asarray(target_sa, dtype=np.float64),
-            periods=np.asarray(periods, dtype=np.float64),
-            n=int(self._n_spin.value()),
-            dt=float(self._dt_spin.value()),
-            zeta=float(self._zeta_spin.value()),
-            pga=float(np.max(target_sa)),
-            tol=float(self._tol_spin.value()),
-            max_iter=int(self._iter_spin.value()),
-            n_trials=int(self._trials_spin.value()),
-            fm=int(self._fm_combo.currentData()),
-        )
-        sig.name = f"一般人工波_{sig.n}x{sig.dt:.3f}"
-        return sig
-
-    def _run_special(self, gm_type: str):
-        assert self._gmpe_check is not None
         assert self._mw_spin is not None
         assert self._r_spin is not None
         assert self._vs30_spin is not None
         assert self._fault_combo is not None
-        assert self._n_spin is not None
-        assert self._dt_spin is not None
-        assert self._zeta_spin is not None
-        assert self._tol_spin is not None
-        assert self._iter_spin is not None
-        assert self._fm_combo is not None
+        assert self._gmpe_check is not None
         assert self._region_combo is not None
         assert self._axis_combo is not None
 
-        spectrum_source = "gmpe" if self._gmpe_check.isChecked() else "code"
-        code_periods = None
-        code_sa = None
-        if spectrum_source == "code":
+        gm_type = str(self._type_combo.currentData())
+        ctx = {
+            "gm_type": gm_type,
+            "n": int(self._n_spin.value()),
+            "dt": float(self._dt_spin.value()),
+            "zeta": float(self._zeta_spin.value()),
+            "tol": float(self._tol_spin.value()),
+            "max_iter": int(self._iter_spin.value()),
+            "n_trials": int(self._trials_spin.value()),
+            "fm": int(self._fm_combo.currentData()),
+            "Mw": float(self._mw_spin.value()),
+            "R": float(self._r_spin.value()),
+            "Vs30": float(self._vs30_spin.value()),
+            "fault_type": str(self._fault_combo.currentData()),
+            "region": str(self._region_combo.currentData()),
+            "axis": str(self._axis_combo.currentData()),
+        }
+        if gm_type == "general":
             target = target_or_warn(self, self._target_service, "人工波生成")
             if target is None:
-                raise ValueError("当前未设置目标谱")
-            code_periods, code_sa = target
+                return None
+            ctx["periods"], ctx["target_sa"] = target
+            ctx["spectrum_source"] = "code"
+        else:
+            spectrum_source = "gmpe" if self._gmpe_check.isChecked() else "code"
+            ctx["spectrum_source"] = spectrum_source
+            ctx["code_periods"] = None
+            ctx["code_sa"] = None
+            if spectrum_source == "code":
+                target = target_or_warn(self, self._target_service, "人工波生成")
+                if target is None:
+                    return None
+                ctx["code_periods"], ctx["code_sa"] = target
+        return ctx
 
-        return create_ground_motion(
-            gm_type,
-            Mw=float(self._mw_spin.value()),
-            R=float(self._r_spin.value()),
-            Vs30=float(self._vs30_spin.value()),
-            fault_type=str(self._fault_combo.currentData()),
-            n=int(self._n_spin.value()),
-            dt=float(self._dt_spin.value()),
-            zeta=float(self._zeta_spin.value()),
-            tol=float(self._tol_spin.value()),
-            max_iter=int(self._iter_spin.value()),
-            fm=int(self._fm_combo.currentData()),
-            spectrum_source=spectrum_source,
-            code_periods=code_periods,
-            code_sa=code_sa,
-            region=str(self._region_combo.currentData()),
-            axis=str(self._axis_combo.currentData()),
+    def _compute(self, ctx, progress_cb, is_cancelled):
+        progress_cb(15, "人工波生成中…")
+        if is_cancelled():
+            raise InterruptedError("用户取消")
+        gm_type = ctx["gm_type"]
+        if gm_type == "general":
+            target_sa = ctx["target_sa"]
+            sig = WaveGenerator.generate(
+                target_spectrum=np.asarray(target_sa, dtype=np.float64),
+                periods=np.asarray(ctx["periods"], dtype=np.float64),
+                n=ctx["n"],
+                dt=ctx["dt"],
+                zeta=ctx["zeta"],
+                pga=float(np.max(target_sa)),
+                tol=ctx["tol"],
+                max_iter=ctx["max_iter"],
+                n_trials=ctx["n_trials"],
+                fm=ctx["fm"],
+            )
+            sig.name = f"一般人工波_{sig.n}x{sig.dt:.3f}"
+        else:
+            sig = create_ground_motion(
+                gm_type,
+                Mw=ctx["Mw"],
+                R=ctx["R"],
+                Vs30=ctx["Vs30"],
+                fault_type=ctx["fault_type"],
+                n=ctx["n"],
+                dt=ctx["dt"],
+                zeta=ctx["zeta"],
+                tol=ctx["tol"],
+                max_iter=ctx["max_iter"],
+                fm=ctx["fm"],
+                spectrum_source=ctx["spectrum_source"],
+                code_periods=ctx["code_periods"],
+                code_sa=ctx["code_sa"],
+                region=ctx["region"],
+                axis=ctx["axis"],
+            )
+        progress_cb(95, "写入信号库…")
+        return {"sig": sig, "gm_type": gm_type}
+
+    def _finalize(self, payload) -> list[SignalRecord]:
+        result = payload["sig"]
+        gm_type = payload["gm_type"]
+        child = SignalRecord(
+            acc=np.asarray(result.acc, dtype=np.float64).copy(),
+            dt=float(result.dt),
+            name=result.name,
+            kind="artificial",
+            meta=self._build_meta(result, gm_type),
         )
+        child_id = self._pool.add(child)
+        self._pool.set_selection([child_id])
+        self._notify(f"人工波生成完成，已入池 1 条 {result.name}")
+        return [child]
 
     def _build_meta(self, sig, gm_type: str) -> dict[str, object]:
         assert self._trials_spin is not None

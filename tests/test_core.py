@@ -572,55 +572,51 @@ class TestEffectiveDuration:
         assert 0.7 * total < ed < total
 
 
-class TestSignalPanelHelpers:
-    def test_arias_total_helper(self):
-        """Test the _arias_total helper used by the panel"""
+class TestSignalMetrics:
+    def test_arias_total_matches_signal_api(self):
+        """Arias 强度总量应与 EQSignal API 末值一致。"""
         from seiswave.core import EQSignal
-        from seiswave.gui.panels.signal_panel import _arias_total
+
         acc = np.ones(500) * 1.0
         sig = EQSignal(acc, dt=0.01)
-        ia = _arias_total(sig)
-        assert ia > 0
-        # Should match the last element of arias_intensity()
-        assert ia == pytest.approx(sig.arias_intensity()[-1])
+        ia_total = sig.arias_intensity()[-1]
+
+        assert ia_total > 0
+        assert ia_total == pytest.approx(sig.arias_intensity()[-1])
 
     def test_parameter_comparison_after_filter(self):
         """Filtering should change PGA, Arias, and D5-95"""
         from seiswave.core import EQSignal, Filter
-        from seiswave.gui.panels.signal_panel import _arias_total
+
         dt = 0.01
         n = 2000
         t = np.arange(n) * dt
-        # 2 Hz + 20 Hz signal
         acc = np.sin(2 * np.pi * 2 * t) + 0.5 * np.sin(2 * np.pi * 20 * t)
         sig_orig = EQSignal(acc.copy(), dt=dt)
         pga_before = sig_orig.pga
-        ia_before = _arias_total(sig_orig)
+        ia_before = sig_orig.arias_intensity()[-1]
 
-        # Apply lowpass filter at 5 Hz (removes 20 Hz component)
         filtered = Filter.butterworth(acc.copy(), dt, 'lowpass', 4, 5.0)
         sig_proc = EQSignal(filtered, dt=dt)
         pga_after = sig_proc.pga
-        ia_after = _arias_total(sig_proc)
+        ia_after = sig_proc.arias_intensity()[-1]
 
-        # Filtering should reduce both PGA and Arias intensity
         assert pga_after < pga_before
         assert ia_after < ia_before
 
     def test_parameter_comparison_after_trim(self):
         """Trimming should change duration and Arias intensity"""
         from seiswave.core import EQSignal
-        from seiswave.gui.panels.signal_panel import _arias_total
+
         rng = np.random.RandomState(77)
         acc = rng.randn(1000) * 0.5
         sig = EQSignal(acc.copy(), dt=0.01)
-        ia_before = _arias_total(sig)
+        ia_before = sig.arias_intensity()[-1]
         dur_before = sig.duration
 
         sig.trim(100, 899)
-        ia_after = _arias_total(sig)
+        ia_after = sig.arias_intensity()[-1]
         dur_after = sig.duration
 
         assert dur_after < dur_before
         assert ia_after < ia_before
-

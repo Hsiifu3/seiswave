@@ -124,7 +124,11 @@ class AppWindow(QMainWindow):
         splitter.setChildrenCollapsible(False)
         self._signal_pool_panel = SignalPoolPanel(self._pool)
         self._preview_panel = PreviewPanel(self._pool, self._target_service)
-        self._tool_dock = ToolDock()
+        self._tool_dock = ToolDock(
+            self._pool,
+            self._target_service,
+            self._preview_panel,
+        )
         splitter.addWidget(self._signal_pool_panel)
         splitter.addWidget(self._preview_panel)
         splitter.addWidget(self._tool_dock)
@@ -170,7 +174,13 @@ class AppWindow(QMainWindow):
 
     def _connect_state(self) -> None:
         assert self._signal_pool_panel is not None
+        assert self._tool_dock is not None
         self._signal_pool_panel.tool_requested.connect(self.set_current_tool)
+        self._tool_dock.message_requested.connect(
+            lambda message: self.statusBar().showMessage(message, 4000)
+        )
+        self._tool_dock.progress_changed.connect(self._on_tool_progress)
+        self._tool_dock.run_state_changed.connect(self._on_tool_run_state)
         self._pool.signals_changed.connect(self._refresh_status)
         self._pool.selection_changed.connect(self._refresh_status)
         self._target_service.target_changed.connect(self._refresh_status)
@@ -251,6 +261,18 @@ class AppWindow(QMainWindow):
         self.set_current_tool(ui_state.get("current_tool", "导入"))
         self._current_project_path = Path(path)
         self.statusBar().showMessage(f"项目已打开：{self._current_project_path.name}", 3000)
+
+    def _on_tool_progress(self, pct: int, text: str) -> None:
+        """工具运行进度 → 状态栏进度条。"""
+        if self._progress_bar is None:
+            return
+        self._progress_bar.setValue(int(pct))
+        self._progress_bar.setFormat(text or "处理中…")
+
+    def _on_tool_run_state(self, running: bool) -> None:
+        """运行中禁用工具切换，避免状态错乱。"""
+        for action in self._tool_actions.values():
+            action.setEnabled(not running)
 
     def _refresh_status(self) -> None:
         count = len(self._pool.selection())

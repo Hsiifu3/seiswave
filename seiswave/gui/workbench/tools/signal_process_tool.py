@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
+    QMessageBox,
     QSpinBox,
     QVBoxLayout,
 )
@@ -79,23 +80,27 @@ class SignalProcessTool(ToolWidget):
         if not records:
             return []
 
-        children = []
-        child_ids = []
-        for record in records:
-            signal = to_eqsignal(record)
-            if self._mode == "baseline":
-                signal, suffix, meta = self._apply_baseline(record, signal)
-            else:
-                signal, suffix, meta = self._apply_filter(record, signal)
-            child = self._pool.derive(
-                record,
-                signal.acc,
-                suffix,
-                kind="processed",
-                meta=meta,
-            )
-            children.append(child)
-            child_ids.append(child.id)
+        try:
+            children = []
+            child_ids = []
+            for record in records:
+                signal = to_eqsignal(record)
+                if self._mode == "baseline":
+                    signal, suffix, meta = self._apply_baseline(record, signal)
+                else:
+                    signal, suffix, meta = self._apply_filter(record, signal)
+                child = self._pool.derive(
+                    record,
+                    signal.acc,
+                    suffix,
+                    kind="processed",
+                    meta=meta,
+                )
+                children.append(child)
+                child_ids.append(child.id)
+        except Exception as exc:
+            QMessageBox.critical(self, title, str(exc))
+            return []
 
         self._pool.set_selection(child_ids)
         self._notify(f"{title}完成，新增 {len(children)} 条处理后信号")
@@ -128,6 +133,19 @@ class SignalProcessTool(ToolWidget):
         order = int(self._filter_order_spin.value())
         f1 = float(self._f1_spin.value())
         f2 = float(self._f2_spin.value())
+        nyquist = 0.5 / float(signal.dt)
+        if ftype in {"bandpass", "lowpass"} and f2 >= nyquist:
+            raise ValueError(
+                f"高截止 {f2:g} Hz ≥ 奈奎斯特频率 {nyquist:.3g} Hz"
+                f"（dt={signal.dt:g}s），请降低截止频率"
+            )
+        if ftype in {"bandpass", "highpass"} and f1 >= nyquist:
+            raise ValueError(
+                f"低截止 {f1:g} Hz ≥ 奈奎斯特频率 {nyquist:.3g} Hz"
+                f"（dt={signal.dt:g}s），请降低截止频率"
+            )
+        if ftype == "bandpass" and f1 >= f2:
+            raise ValueError(f"低截止 {f1:g} Hz 必须小于高截止 {f2:g} Hz")
         signal.filter(ftype=ftype, order=order, f1=f1, f2=f2)
         suffix = f"滤波 ({ftype})"
         meta = build_child_meta(

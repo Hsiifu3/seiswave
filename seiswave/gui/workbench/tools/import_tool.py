@@ -84,6 +84,7 @@ class ImportTool(ToolWidget):
         try:
             assert self._path_edit is not None
             assert self._mode_combo is not None
+            self._last_skipped = []
             source_path = Path(self._path_edit.text().strip()).expanduser()
             if not source_path.exists():
                 raise FileNotFoundError(f"导入路径不存在: {source_path}")
@@ -115,7 +116,13 @@ class ImportTool(ToolWidget):
                 records.append(record)
 
             self._pool.set_selection(selection_ids)
-            self._notify(f"已导入 {len(records)} 条信号")
+            skipped = getattr(self, "_last_skipped", [])
+            if skipped:
+                self._notify(
+                    f"已导入 {len(records)} 条信号（跳过 {len(skipped)} 个无法读取的文件）"
+                )
+            else:
+                self._notify(f"已导入 {len(records)} 条信号")
             return records
         except Exception as exc:
             QMessageBox.critical(self, "导入", str(exc))
@@ -140,8 +147,22 @@ class ImportTool(ToolWidget):
                 return suffix in {".txt", ".dat"}
             return suffix in {".at2", ".txt", ".dat"}
 
-        loaded = [self._load_file(path) for path in sorted(candidates) if allowed(path)]
+        loaded = []
+        skipped: list[tuple[str, str]] = []
+        for path in sorted(candidates):
+            if not allowed(path):
+                continue
+            try:
+                loaded.append(self._load_file(path))
+            except Exception as exc:  # 单个坏文件不应连累整批
+                skipped.append((path.name, str(exc)))
+        self._last_skipped = skipped
         if not loaded:
+            if skipped:
+                first_name, first_err = skipped[0]
+                raise ValueError(
+                    f"目录中 {len(skipped)} 个文件均无法导入，例如 {first_name}: {first_err}"
+                )
             raise ValueError(f"目录中未找到可导入的 AT2/TXT 文件: {directory}")
         return loaded
 

@@ -1,7 +1,9 @@
-from setuptools import setup, find_packages
+from pathlib import Path
 
-with open("README.md", encoding="utf-8") as f:
-    long_description = f.read()
+from setuptools import find_packages, setup
+
+
+long_description = Path("README.md").read_text(encoding="utf-8")
 
 setup(
     name="seiswave",
