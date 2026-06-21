@@ -57,6 +57,10 @@ class TargetSpectrumService(QObject):
             params.pop("periods", self._periods),
             dtype=np.float64,
         ).copy()
+        # 规范设计谱仅定义至 6s，截断到规范范围，不向更长周期外推
+        periods = periods[periods <= 6.0]
+        if periods.size == 0:
+            raise ValueError("规范谱周期范围内（0–6s）没有有效周期点")
         zeta = float(params.pop("zeta", self._zeta))
         normalized = code.strip().lower().replace("/", "").replace(" ", "")
 

@@ -85,16 +85,13 @@ class CodeSpectrum:
         alpha[mask2] = eta2 * alpha_max
 
         if isolation:
-            mask3 = periods > Tg
+            mask3 = (periods > Tg) & (periods <= 6.0)
             alpha[mask3] = eta2 * alpha_max * (Tg / periods[mask3]) ** gamma
         else:
             mask3 = (periods > Tg) & (periods <= 5.0 * Tg)
             alpha[mask3] = eta2 * alpha_max * (Tg / periods[mask3]) ** gamma
 
-            # 第四段直线下降。GB50011 仅定义至 6s，但目标谱若在 6s 处归零会出现
-            # 断崖、破坏匹配；故沿用规范公式延伸至全部 T>5Tg，并由末尾 clip 限于 ≥0，
-            # 实现 6s 之后的平滑延续（工程常用做法，§5.1.5 注 5 之外的连续化处理）。
-            mask4 = periods > 5.0 * Tg
+            mask4 = (periods > 5.0 * Tg) & (periods <= 6.0)
             alpha[mask4] = alpha_max * (
                 eta2 * (0.2 ** gamma) - eta1 * (periods[mask4] - 5.0 * Tg)
             )
