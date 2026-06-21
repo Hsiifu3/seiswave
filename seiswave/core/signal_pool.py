@@ -131,6 +131,17 @@ class SignalPool(QObject):
         """按插入顺序返回全部记录。"""
         return list(self._records.values())
 
+    def clear(self) -> None:
+        """清空全部记录与当前选中。"""
+        had_records = bool(self._records)
+        had_selection = bool(self._selection_ids)
+        self._records.clear()
+        self._selection_ids = []
+        if had_records:
+            self.signals_changed.emit()
+        if had_selection:
+            self.selection_changed.emit()
+
     def set_selection(self, ids: list[str]) -> None:
         """更新当前选中信号。"""
         seen: set[str] = set()
@@ -149,6 +160,10 @@ class SignalPool(QObject):
     def selection(self) -> list[SignalRecord]:
         """返回当前选中的记录对象。"""
         return [self._records[id] for id in self._selection_ids if id in self._records]
+
+    def selection_ids(self) -> list[str]:
+        """返回当前选中的记录 ID。"""
+        return list(self._selection_ids)
 
     def derive(
         self,

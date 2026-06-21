@@ -1,0 +1,14 @@
+实现 SeisWave 工作台重构。
+
+先读这两份文档,严格据此执行:
+- 计划(逐步照做): docs/superpowers/plans/2026-06-21-seiswave-redesign-plan.md
+- 设计(背景与架构): docs/superpowers/specs/2026-06-20-seiswave-redesign-design.md
+
+执行规则(务必遵守):
+1. 当前分支已是 feature/workbench,在此分支上做。
+2. 从 Phase 1 开始,按 Phase 1→5 顺序实现;每个 Phase 写代码 + 对应测试,测试全绿后才进下一个 Phase;每个 Phase 一个 git 提交(中文提交信息,跟随现有风格)。
+3. 运行 Python 用 /usr/bin/python3(本机 .venv 是空的),先 export PYTHONPATH=/Users/yachiyo/Developer/seiswave:$PYTHONPATH;GUI 测试设 QT_QPA_PLATFORM=offscreen。
+4. 不改 core 数值算法(谱匹配/ChinaGMPE/NFP/selector/combiner);现有 core/gmpe/ff_nf 测试(152+ 项)必须持续全绿。本次只新增 GUI + 薄服务层,并把谱拟合从 generator 抽成独立 spectral_match 薄封装(抽出后人工波结果须与抽出前一致,加回归测试)。
+5. 每个 Phase 完成时跑该 Phase 的测试 + 一遍既有 core 回归,贴出结果。
+
+现在开始 Phase 1:实现 seiswave/core/signal_pool.py(SignalRecord/SignalPool)、seiswave/core/target_spectrum.py(TargetSpectrumService 三源)、seiswave/gui/fonts.py(按平台 SimSun/Songti SC + Times New Roman),并写 tests/test_signal_pool.py、tests/test_target_spectrum.py、tests/test_fonts.py,跑绿后提交。

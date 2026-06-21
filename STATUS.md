@@ -5,24 +5,33 @@
 - GitHub: https://github.com/Hsiifu3/seiswave
 - 工匠代理: Codex
 - 创建日期: 2026-02-12
-- 最后更新: 2026-06-21 12:01:08
+- 最后更新: 2026-06-21 12:34:26
 
 ## 当前状态
 - 版本: v2.0.2
 - 分支: feature/workbench
-- 总体进度: ████████████ 95%（GUI 4项修复 + Fortran 混合路径已落地）
-- 健康度: 🟢 健康（Phase 1 新增测试与 core/gmpe/ff_nf 回归均已通过）
+- 总体进度: ████████████ 96%（工作台主壳三栏联动已落地，待继续 Phase 3 工具移植）
+- 健康度: 🟢 健康（Phase 2 离屏测试与 Phase 1/core/gmpe/ff_nf 回归均已通过）
 - 覆盖率（主代码口径）: **93%**（6625 行中 435 行未覆盖）
 - Feature-001: ✅ 已闭环，主链路稳定
 - GUI重构: ✅ GeneratorPanel 三栏响应式布局完成，相关回归已长期稳定
-- 工作台重构: 🔄 Phase 1/5 已完成，Phase 2 主壳开发待继续
+- 工作台重构: 🔄 Phase 2/5 已完成，Phase 3 工具移植待继续
 - 测试补强: ✅ 本轮已完成一轮高价值 coverage 冲刺，重点补强 `io / workers / import / result / selector / generator helpers`
 - 覆盖率口径: ✅ 已固化 `.coveragerc`，排除 `gui_backup_20250215` / `gui.bak` 等备份目录污染
 - 单测速度: 90s（从上一轮 126s 优化）
 - **最新测试确认**: 2026-05-25 全量回归 `695 passed, 0 failed, 0 warning`，耗时 90.04s
-- **本轮验证**: 2026-06-21 Phase 1 新增单测 `13 passed`；既有 core/gmpe/ff_nf 回归 `156 passed`（沿用既有 warnings，未在本 Phase 处理）
+- **本轮验证**: 2026-06-21 Phase 2 离屏测试 `4 passed`；Phase 1 + core/gmpe/ff_nf 回归 `140 passed`（沿用既有 generator warnings，未在本 Phase 处理）
 
 ## 已完成
+- [x] SeisWave 工作台重构 Phase 2（2026-06-21）：
+  - 新增 `seiswave/gui/workbench/app_window.py`：QMainWindow 三栏主壳、顶部工具栏占位、`项目` 菜单、新建/打开/保存、底部状态与进度条
+  - 新增 `seiswave/gui/workbench/signal_pool_panel.py`、`preview_panel.py`、`scorecard.py`、`tool_dock.py`、`project_io.py`、`__init__.py`
+  - 打通信号库 ↔ 中央预览联动：多选同步 `SignalPool`，绘制加速度/速度/位移三联时程与结果谱 vs 目标谱，支持三联对数图 / 多阻尼选项
+  - 新增项目 JSON/NPZ 存开往返，序列化信号池、目标谱与工作台 UI 状态
+  - 复用 Phase 1 服务并补充 `SignalPool.clear/selection_ids`、`TargetSpectrumService.clear/source/meta/zeta` 以支撑主壳与项目恢复
+  - `seiswave/gui/widgets/plot_widget.py` 切换为统一走 `gui/fonts.setup_matplotlib_fonts`
+  - 新增 `tests/test_workbench_shell.py`：主窗口构建、选中联动绘图、记分卡、项目 round-trip
+  - 验证：Phase 2 离屏测试 `4 passed`；Phase 1 + core/gmpe/ff_nf 回归 `140 passed`
 - [x] SeisWave 工作台重构 Phase 1（2026-06-21）：
   - 新增 `seiswave/core/signal_pool.py`：`SignalRecord` 惰性 `vel/disp/spectrum` 缓存、`SignalPool` 增删/选中/derive/provenance
   - 新增 `seiswave/core/target_spectrum.py`：`TargetSpectrumService` 支持规范谱 / 从记录算 / 自定义文件三源切换
@@ -94,7 +103,7 @@
   - 手动验证：窗口 1200x800、左栏可滚动无溢出、中间谱图 ≥500px、NFP 右栏脉冲参数显示、三类地震动 UI 不闪退
 
 ## 进行中
-- [ ] SeisWave 工作台重构 Phase 2-5（下一步：三栏工作台主壳、中央预览、项目存开）
+- [ ] SeisWave 工作台重构 Phase 3-5（下一步：移植导入 / 自动选波 / 人工波生成等右栏工具）
 - [x] 异步文件加载验收（用户测试）
 - [x] 性能基准测试
 - [x] `generator.py` coverage 冲刺完成：从 86% → 99%
@@ -121,6 +130,8 @@
 ## 会话历史（最近5次）
 | 日期 | 工匠 | 任务 | 结果 | 耗时 |
 |------|------|------|------|------|
+| 2026-06-21 | codex | Phase 2 三栏工作台主壳、预览联动、项目存开与离屏测试完成 | in-progress | - |
+| 2026-06-21 | codex | Phase 2 工作台主壳：三栏联动、记分卡、项目存开 | 新增离屏测试 `4 passed`；Phase 1 + core/gmpe/ff_nf 回归 `140 passed` | - |
 | 2026-06-21 | codex | Phase 1完成但提交受阻：.git 目录只读 | blocked | - |
 | 2026-06-21 | codex | Phase 1代码完成：信号池/目标谱服务/字体封装与测试 | 新增测试 `13 passed`；core/gmpe/ff_nf 回归 `156 passed`，但 `.git` 只读导致本 Phase 无法提交 | - |
 | 2026-05-21 | codex | GUI 4项用户体验修复 | done | - |
@@ -149,7 +160,7 @@
 | 2026-05-18 | codex | Feature-001 Task 1: 包络参数预设模块 | 45测试通过 | - |
 
 ## 下一步计划
-1. 进入工作台重构 Phase 2：实现三栏主壳、中央 a/v/d + 反应谱预览、项目存开
-2. 在 Phase 2 结束后补离屏 GUI 测试，并继续串跑既有 core 回归
-3. Phase 3 再抽离谱拟合薄封装并补人工波结果一致性回归
+1. 进入工作台重构 Phase 3：优先移植导入、自动选波、人工波生成，并把右栏工具占位替换为真实参数面板
+2. 将独立反应谱 / 谱拟合 / 组合校核工具接到当前 `SignalPool` 与 `TargetSpectrumService`
+3. 为 Phase 3 工具链补离屏 GUI 测试与结果一致性回归
 4. 视后续节奏再回收历史 coverage / warning 技术债

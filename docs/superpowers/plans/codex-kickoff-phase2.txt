@@ -1,0 +1,23 @@
+继续 SeisWave 工作台重构,现在做 Phase 2(工作台三栏主壳)。
+
+先读计划: docs/superpowers/plans/2026-06-21-seiswave-redesign-plan.md 的 Phase 2 章节;以及设计 docs/superpowers/specs/2026-06-20-seiswave-redesign-design.md 的 §2-§3。
+
+前提:Phase 1 已完成并提交(seiswave/core/signal_pool.py SignalPool/SignalRecord、seiswave/core/target_spectrum.py TargetSpectrumService、seiswave/gui/fonts.py),直接复用它们。
+
+执行规则(务必遵守):
+1. 分支 feature/workbench,在此分支做。
+2. 运行 Python 用 /usr/bin/python3,先 export PYTHONPATH=/Users/yachiyo/Developer/seiswave:$PYTHONPATH;GUI 测试设 QT_QPA_PLATFORM=offscreen。
+3. 不改 core 数值算法;现有 core/gmpe/ff_nf 与 Phase 1 测试必须持续全绿。
+4. 注意:沙箱把 .git 设为只读,你无法 git 提交——这没关系,只管把代码和测试写好、跑绿,提交由人工 review 后完成。不要因为提交失败而反复重试 git。
+
+Phase 2 目标:在 seiswave/gui/workbench/ 下实现工作台主壳,三栏布局跑通"信号库↔中央预览"联动:
+- app_window.py：QMainWindow,顶部工具栏(工具按钮占位)+ 三栏 QSplitter + 底部状态/进度 + 菜单(项目 新建/打开/保存);接入 SignalPool / TargetSpectrumService 单例,字体用 gui/fonts。
+- signal_pool_panel.py：左栏信号库列表(显示 kind/来源),多选 → pool.set_selection;[导入][自动选波][生成] 入口按钮(暂占位,Phase 3 接工具)。
+- preview_panel.py：中栏,选中信号变化时画 加速度/速度/位移 三联时程 + 反应谱(结果 vs 目标谱,支持三联对数图/多阻尼选项);复用 widgets/plot_widget,字体走 fonts.setup_matplotlib_fonts。
+- scorecard.py：拟合记分卡子组件(均值误差% / PGA / PGV / PGD / Arias / 显著持时),由选中信号 + 目标谱算。
+- tool_dock.py：右栏工具参数容器,可按当前工具切换内容(Phase 2 先占位)。
+- project_io.py：项目存/开(序列化 pool + target + 当前状态为 json/npz),往返一致。
+
+测试 tests/test_workbench_shell.py(offscreen):主窗口构建无异常;选中信号 → preview 三联图与谱被绘制(检查 axes/line 数量);记分卡数值正确;项目存→开往返还原 pool/target。
+
+完成后跑:Phase 2 离屏测试 + 一遍既有 core/Phase1 回归,贴结果。

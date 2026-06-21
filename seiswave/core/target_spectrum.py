@@ -156,6 +156,14 @@ class TargetSpectrumService(QObject):
             self._description = f"自定义目标谱 ({file_name}, {len(periods_arr)} 点)"
         self.target_changed.emit()
 
+    def clear(self) -> None:
+        """清空当前目标谱。"""
+        self._sa = None
+        self._source = None
+        self._description = "未设置目标谱"
+        self._meta = {}
+        self.target_changed.emit()
+
     def periods(self) -> np.ndarray:
         """返回当前目标谱的周期数组。"""
         return self._periods.copy()
@@ -169,3 +177,15 @@ class TargetSpectrumService(QObject):
     def describe(self) -> str:
         """返回当前目标谱的文字描述。"""
         return self._description
+
+    def source(self) -> str | None:
+        """返回当前目标谱来源。"""
+        return self._source
+
+    def meta(self) -> dict[str, Any]:
+        """返回当前目标谱元数据副本。"""
+        return dict(self._meta)
+
+    def zeta(self) -> float:
+        """返回当前目标谱阻尼比。"""
+        return self._zeta

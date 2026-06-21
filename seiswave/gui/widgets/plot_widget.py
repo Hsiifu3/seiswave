@@ -18,6 +18,10 @@ warnings.filterwarnings("ignore", category=PyparsingDeprecationWarning)
 import matplotlib
 matplotlib.use('QtAgg')
 
+from seiswave.gui.fonts import setup_matplotlib_fonts
+
+setup_matplotlib_fonts()
+
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
@@ -26,10 +30,6 @@ from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QAction
 
 from seiswave.gui.styles import get_mpl_colors
-
-# 中文字体配置：中文宋体(Songti SC) + 英文 Times New Roman
-plt.rcParams['font.family'] = ['Times New Roman', 'Songti SC']
-plt.rcParams['axes.unicode_minus'] = False
 
 
 class PlotCanvas(FigureCanvasQTAgg):
