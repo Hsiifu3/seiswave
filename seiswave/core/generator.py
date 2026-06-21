@@ -1105,14 +1105,17 @@ class WaveGenerator:
     @staticmethod
     def _solve_tikhonov(M, dR, lam=1.0):
         """Tikhonov 正则化求解 (M^T M + lam*I) alpha = M^T dR"""
-        MtM = M.T @ M
-        MtdR = M.T @ dR
-        # 添加正则化
-        A = MtM + lam * np.eye(M.shape[1])
-        try:
-            alpha = np.linalg.solve(A, MtdR)
-        except np.linalg.LinAlgError:
-            alpha, _, _, _ = np.linalg.lstsq(A, MtdR, rcond=None)
+        # 退化输入时矩阵可能含极大值，运算会触发 over/invalid 警告；
+        # 下方 nan_to_num+clip 已兜底，这里静默以免刷屏（不改变数值结果）。
+        with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
+            MtM = M.T @ M
+            MtdR = M.T @ dR
+            # 添加正则化
+            A = MtM + lam * np.eye(M.shape[1])
+            try:
+                alpha = np.linalg.solve(A, MtdR)
+            except np.linalg.LinAlgError:
+                alpha, _, _, _ = np.linalg.lstsq(A, MtdR, rcond=None)
         alpha = np.nan_to_num(alpha, nan=0.0, posinf=0.0, neginf=0.0)
         alpha = np.clip(alpha, -1e3, 1e3)
         return alpha

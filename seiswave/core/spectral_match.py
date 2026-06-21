@@ -107,7 +107,8 @@ def _match_to_target_impl(
         alpha = np.clip(alpha, -1e3, 1e3)
 
         W_safe = np.nan_to_num(W, nan=0.0, posinf=0.0, neginf=0.0)
-        base_delta = W_safe @ alpha
+        with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
+            base_delta = W_safe @ alpha
         base_delta = np.nan_to_num(base_delta, nan=0.0, posinf=0.0, neginf=0.0)
         amax = float(np.max(np.abs(base_delta)))
         if amax > 0.5 * peak0 and amax > 0:
