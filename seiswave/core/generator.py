@@ -785,123 +785,18 @@ class WaveGenerator:
         - 求解：Levenberg-Marquardt 阻尼最小二乘，防止 dR 过大发散
         - 控制：多层级收敛+发散检测，alpha clip 收紧到 ±1e3
         """
-        TWO_PI = 2.0 * np.pi
-        peak0 = float(np.max(np.abs(acc)))
-        a = acc.copy()
+        from .spectral_match import _match_to_target_impl
 
-        SPA, SPI = WaveGenerator._spamixed(a, dt, zeta, P, nP)
-        aerror, merror = WaveGenerator._errora(np.abs(SPA), SPAT, nP)
-
-        if aerror <= tol and merror <= 3.0 * tol:
-            return a, aerror
-
-        minerr = aerror
-        best = a.copy()
-        iteration = 1
-        stall = 0
-
-        # 预计算频域常量
-        nfft_freq = WaveGenerator._nextpow2(n) * 2
-        nf = nfft_freq // 2 + 1
-        fs = 1.0 / dt
-        df_freq = fs / nfft_freq
-        wj = np.zeros(nf)
-        wj[1:] = TWO_PI * np.arange(1, nf) * df_freq
-        wj2 = wj * wj
-        w0_arr = TWO_PI / P
-
-        while iteration <= max_iter:
-            # ─── 收敛检查 ───
-            if aerror <= tol and merror <= 3.0 * tol:
-                break
-
-            # ─── 计算 dR（带符号相对残差，必须与带符号的 M 同约定）───
-            # 目标：带符号响应 SPA[i] → sign(SPA[i])·SPAT[i]（即 |SPA|→SPAT 但保持方向）。
-            # 归一化期望变化 = sign(SPA) - SPA/SPAT。对响应峰为负的周期（约半数），
-            # 这给出负 dR，驱动响应更负；若误用无符号 (SPAT-|SPA|)/SPAT，半数周期方向相反，
-            # 合成步永远上坡 → line-search 无法接受任何步长（见此前 trace）。
-            dR = np.sign(SPA) - SPA / np.maximum(SPAT, 1e-30)
-
-            # ─── 构造 nP 个改进 wavelet（峰值对齐到各周期当前响应峰时刻）───
-            W = np.zeros((n, nP), dtype=np.float64)
-            for i in range(nP):
-                W[:, i] = WaveGenerator._wfunc_atik(n, dt, SPI[i], P[i], zeta)
-
-            # ─── 计算 nP × nP 响应矩阵（全自由度）───
-            M = np.zeros((nP, nP), dtype=np.float64)
-
-            W_padded = np.zeros((nP, nfft_freq), dtype=np.float64)
-            W_padded[:, :n] = W.T
-            Wf = np.fft.rfft(W_padded, axis=1)
-
-            spi_idx = SPI - 1
-            for i in range(nP):
-                w0 = w0_arr[i]
-                w0i2 = w0 * w0
-                w0iwj = w0 * wj
-                denom = w0i2 - wj2 + 2.0j * zeta * w0iwj
-                safe = np.abs(denom) > 1e-30
-                H = np.ones(nf, dtype=complex)
-                H[safe] = (w0i2 + 2.0j * zeta * w0iwj[safe]) / denom[safe]
-
-                raf = Wf * H[np.newaxis, :]
-                ra_all = np.fft.irfft(raf, nfft_freq, axis=1)
-
-                # M[i, j] = 周期 i 振子在其当前响应峰值时刻 SPI[i] 处对 wavelet j 的响应
-                # （Al Atik-Abrahamson 2010 的耦合矩阵：每行单一时刻取值，保留符号）。
-                si = spi_idx[i]
-                if 0 <= si < n:
-                    M[i, :] = ra_all[:, si] / max(SPAT[i], 1e-30)
-                else:
-                    M[i, i] = 1.0
-
-            # Tikhonov 正则化求解 M·alpha = dR
-            alpha = WaveGenerator._solve_tikhonov(M, dR, lam=10.0)
-            alpha = np.nan_to_num(alpha, nan=0.0, posinf=0.0, neginf=0.0)
-            alpha = np.clip(alpha, -1e3, 1e3)
-
-            # ─── 完整步增量（不在循环内硬裁剪 PGA，避免破坏谱形）───
-            W_safe = np.nan_to_num(W, nan=0.0, posinf=0.0, neginf=0.0)
-            base_delta = W_safe @ alpha
-            base_delta = np.nan_to_num(base_delta, nan=0.0, posinf=0.0, neginf=0.0)
-            amax = float(np.max(np.abs(base_delta)))
-            if amax > 0.5 * peak0 and amax > 0:
-                base_delta *= (0.5 * peak0) / amax  # 单步幅值上限，防过冲
-
-            # ─── Backtracking line-search：误差不降就把步长减半，保证单调下降 ───
-            improved = False
-            s = 1.0
-            for _ls in range(8):
-                a_trial = a + s * base_delta
-                SPA_t, SPI_t = WaveGenerator._spamixed(a_trial, dt, zeta, P, nP)
-                ae_t, me_t = WaveGenerator._errora(np.abs(SPA_t), SPAT, nP)
-                if ae_t < aerror:
-                    a = a_trial
-                    SPA, SPI = SPA_t, SPI_t
-                    aerror, merror = ae_t, me_t
-                    improved = True
-                    break
-                s *= 0.5
-
-            if progress_callback:
-                progress_callback(iteration, merror, aerror)
-
-            if not improved:
-                # 当前 Jacobian 下已无法继续下降 → 收敛/停滞，退出
-                break
-
-            if aerror < minerr - 1e-9:
-                minerr = aerror
-                best = a.copy()
-                stall = 0
-            else:
-                stall += 1
-                if stall >= 3:
-                    break
-
-            iteration += 1
-
-        return best, minerr
+        return _match_to_target_impl(
+            np.asarray(acc, dtype=np.float64),
+            dt,
+            np.asarray(P[:nP], dtype=np.float64),
+            np.asarray(SPAT[:nP], dtype=np.float64),
+            zeta=zeta,
+            tol=tol,
+            max_iter=max_iter,
+            progress_callback=progress_callback,
+        )
 
     @staticmethod
     def _adjustspectra(acc, n, dt, zeta, P, nP, SPAT, tol, max_iter,

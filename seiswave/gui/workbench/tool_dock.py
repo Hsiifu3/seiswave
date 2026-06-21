@@ -17,11 +17,14 @@ from seiswave.core.target_spectrum import TargetSpectrumService
 
 from .preview_panel import PreviewPanel
 from .tools import (
+    ArtificialTool,
+    AutoSelectTool,
+    CombineTool,
     DataExportTool,
     ImportTool,
-    PlaceholderTool,
     PlotExportTool,
     SignalProcessTool,
+    SpectralMatchTool,
     SpectraTool,
 )
 
@@ -95,11 +98,19 @@ class ToolDock(QWidget):
         )
         self._add_tool(
             "自动选波",
-            PlaceholderTool("下一批接入目标谱驱动的一键自动选波。"),
+            AutoSelectTool(
+                self._pool,
+                self._target_service,
+                self.message_requested.emit,
+            ),
         )
         self._add_tool(
             "人工波生成",
-            PlaceholderTool("下一批接入一般 / FF / NF / NFP 人工波生成。"),
+            ArtificialTool(
+                self._pool,
+                self._target_service,
+                self.message_requested.emit,
+            ),
         )
         self._add_tool(
             "基线校正",
@@ -111,7 +122,11 @@ class ToolDock(QWidget):
         )
         self._add_tool(
             "谱拟合",
-            PlaceholderTool("下一批接入独立谱拟合与 spectral_match 抽出。"),
+            SpectralMatchTool(
+                self._pool,
+                self._target_service,
+                self.message_requested.emit,
+            ),
         )
         self._add_tool(
             "反应谱",
@@ -119,7 +134,11 @@ class ToolDock(QWidget):
         )
         self._add_tool(
             "组合校核",
-            PlaceholderTool("下一批接入波组组合与规范校核。"),
+            CombineTool(
+                self._pool,
+                self._target_service,
+                self.message_requested.emit,
+            ),
         )
 
     def _add_tool(self, name: str, widget: QWidget) -> None:

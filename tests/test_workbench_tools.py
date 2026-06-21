@@ -11,9 +11,11 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import numpy as np
 import pytest
 
+from seiswave.core.code_spec import CodeSpectrum
 from seiswave.core.io import FileIO
 from seiswave.core.signal_pool import SignalPool, SignalRecord
 from seiswave.core.target_spectrum import TargetSpectrumService
+from seiswave.core.spectrum import Spectra
 from seiswave.gui.workbench.app_window import AppWindow
 
 
@@ -54,6 +56,29 @@ def _build_window() -> tuple[AppWindow, SignalPool, TargetSpectrumService]:
     window = AppWindow(pool=pool, target_service=target)
     pool.set_selection([record_a.id, record_b.id])
     return window, pool, target
+
+
+def _make_peer_dir(tmp_path: Path) -> Path:
+    directory = tmp_path / "peer_db"
+    directory.mkdir()
+    specs = [
+        ("RSN1_TEST_EVENT_A_H1.AT2", 1.00),
+        ("RSN2_TEST_EVENT_B_H1.AT2", 0.92),
+        ("RSN3_TEST_EVENT_C_H1.AT2", 0.86),
+        ("RSN4_TEST_EVENT_D_H1.AT2", 1.08),
+    ]
+    time = np.linspace(0.0, 20.0, 2001)
+    base = 0.15 * np.sin(2.0 * np.pi * 1.0 * time) + 0.05 * np.sin(
+        2.0 * np.pi * 2.5 * time + 0.4
+    )
+    for filename, scale in specs:
+        FileIO.write_at2(directory / filename, base * scale, float(time[1] - time[0]))
+    return directory
+
+
+def _make_target_for_tool(periods: np.ndarray) -> np.ndarray:
+    params = CodeSpectrum.get_params(intensity=8, group=2, site_class="II", level="frequent")
+    return CodeSpectrum.gb50011(periods, params["Tg"], params["alpha_max"], zeta=0.05)
 
 
 class TestWorkbenchTools:
@@ -225,5 +250,177 @@ class TestWorkbenchTools:
             assert not np.allclose(filter_child.acc, original.acc)
             assert filter_child.meta["operation"] == "filter"
             assert filter_child.meta["provenance"][-1]["ftype"] == "highpass"
+        finally:
+            window.close()
+
+    def test_spectral_match_tool_derives_record_with_lower_rmse(self, qapp):
+        window, pool, target = _build_window()
+        try:
+            original = pool.all()[0]
+            pool.set_selection([original.id])
+            tool = window._tool_dock._tool_widgets["谱拟合"]
+            tool._iter_spin.setValue(8)
+
+            periods = target.periods()
+            before = original.spectrum(periods, zeta=0.05).sa
+            before_rmse = np.sqrt(
+                np.mean(((before - target.sa()) / np.maximum(target.sa(), 1e-12)) ** 2)
+            )
+
+            children = tool.run_tool()
+            qapp.processEvents()
+
+            assert len(children) == 1
+            child = children[0]
+            after = child.spectrum(periods, zeta=0.05).sa
+            after_rmse = np.sqrt(
+                np.mean(((after - target.sa()) / np.maximum(target.sa(), 1e-12)) ** 2)
+            )
+            assert child.kind == "processed"
+            assert child.meta["operation"] == "spectral_match"
+            assert child.meta["match_rmse_after"] < child.meta["match_rmse_before"]
+            assert after_rmse < before_rmse
+        finally:
+            window.close()
+
+    def test_artificial_tool_generates_general_ff_nf_nfp_with_metadata(self, qapp):
+        window, pool, target = _build_window()
+        try:
+            tool = window._tool_dock._tool_widgets["人工波生成"]
+            tool._n_spin.setValue(128)
+            tool._iter_spin.setValue(4)
+            tool._trials_spin.setValue(1)
+
+            cases = [
+                ("general", "一般人工波", False),
+                ("FF", "远场 FF", False),
+                ("NF", "近场 NF", False),
+                ("NFP", "近场脉冲 NFP", True),
+            ]
+
+            created = []
+            for data, _label, expect_pulse in cases:
+                index = tool._type_combo.findData(data)
+                tool._type_combo.setCurrentIndex(index)
+                tool._refresh_mode_ui()
+                result = tool.run_tool()
+                qapp.processEvents()
+                assert len(result) == 1
+                record = result[0]
+                created.append(record)
+                assert record.kind == "artificial"
+                assert record.meta["generation_type"] == data
+                assert record.meta["source"] == "artificial_generation"
+                assert record.meta["pulse"] is expect_pulse
+                assert np.max(np.abs(record.acc)) > 0
+                assert record.spectrum(target.periods(), zeta=0.05).sa.max() > 0
+                if data == "general":
+                    assert record.meta["spectrum_source"] == "custom"
+                else:
+                    assert "near_field_factor" in record.meta
+                    assert record.meta["spectrum_source"] == "code"
+            assert len(created) == 4
+        finally:
+            window.close()
+
+    def test_auto_select_tool_from_pool_returns_n_records_with_rmse_metadata(self, qapp):
+        window, pool, target = _build_window()
+        try:
+            target.set_from_record(pool.all()[0], periods=target.periods(), zeta=0.05)
+            tool = window._tool_dock._tool_widgets["自动选波"]
+            tool._source_combo.setCurrentIndex(tool._source_combo.findData("pool"))
+            tool._refresh_source_ui()
+            tool._n_select_spin.setValue(2)
+            tool._tol_spin.setValue(0.60)
+            tool._dur_factor_spin.setValue(1.0)
+            tool._scale_lo_spin.setValue(0.1)
+            tool._scale_hi_spin.setValue(10.0)
+
+            records = tool.run_tool()
+            qapp.processEvents()
+
+            assert len(records) == 2
+            for record in records:
+                assert record.kind == "natural"
+                assert record.meta["operation"] == "auto_select"
+                assert record.meta["match_rmse"] < 0.60
+        finally:
+            window.close()
+
+    def test_auto_select_tool_from_peer_directory_returns_n_records(self, qapp, tmp_path):
+        periods = Spectra.default_periods(0.04, 3.0, 60, mode="mixed")
+        pool = SignalPool()
+        target = TargetSpectrumService(periods=periods)
+        time = np.linspace(0.0, 20.0, 2001)
+        base = 0.15 * np.sin(2.0 * np.pi * 1.0 * time) + 0.05 * np.sin(
+            2.0 * np.pi * 2.5 * time + 0.4
+        )
+        reference = SignalRecord(
+            acc=base,
+            dt=float(time[1] - time[0]),
+            name="peer-ref",
+            kind="natural",
+        )
+        target.set_from_record(reference, periods=periods, zeta=0.05)
+        window = AppWindow(pool=pool, target_service=target)
+        try:
+            peer_dir = _make_peer_dir(tmp_path)
+            tool = window._tool_dock._tool_widgets["自动选波"]
+            tool._source_combo.setCurrentIndex(tool._source_combo.findData("peer"))
+            tool._path_edit.setText(str(peer_dir))
+            tool._n_select_spin.setValue(3)
+            tool._tol_spin.setValue(0.80)
+            tool._dur_factor_spin.setValue(1.0)
+
+            records = tool.run_tool()
+            qapp.processEvents()
+
+            assert len(records) == 3
+            assert len(pool.all()) == 3
+            for record in records:
+                assert record.meta["selector_source"] == "peer"
+                assert record.meta["match_rmse"] < 0.80
+        finally:
+            window.close()
+
+    def test_combine_tool_validates_and_exports_selected_records(self, qapp, tmp_path):
+        periods = Spectra.default_periods(0.04, 3.0, 60, mode="mixed")
+        target_sa = _make_target_for_tool(periods)
+        target = TargetSpectrumService(periods=periods)
+        target.set_custom(periods, target_sa)
+        pool = SignalPool()
+        source = _make_record("Combo-Base", 1.0)
+        for index in range(7):
+            pool.add(
+                SignalRecord(
+                    acc=source.acc.copy(),
+                    dt=source.dt,
+                    name=f"Combo-{index+1}",
+                    kind="natural" if index < 5 else "artificial",
+                    meta={
+                        "source": "unit-test",
+                        "rsn": index + 1,
+                        "match_rmse": 0.05,
+                    },
+                )
+            )
+        window = AppWindow(pool=pool, target_service=target)
+        try:
+            pool.set_selection([record.id for record in pool.all()])
+            tool = window._tool_dock._tool_widgets["组合校核"]
+            tool._dir_edit.setText(str(tmp_path))
+            tool._fmt_combo.setCurrentIndex(tool._fmt_combo.findData("both"))
+            tool._html_check.setChecked(True)
+
+            result = tool.run_tool()
+            qapp.processEvents()
+
+            assert result is not None
+            validation = result["validation"]
+            assert validation.n_groups == 7
+            assert result["output_dir"] is not None
+            out_dir = Path(result["output_dir"])
+            assert (out_dir / "summary.json").exists()
+            assert (out_dir / "report.html").exists()
         finally:
             window.close()

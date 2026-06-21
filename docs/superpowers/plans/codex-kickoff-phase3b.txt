@@ -1,0 +1,17 @@
+继续 SeisWave 工作台重构 Phase 3 第二批(承接已完成的第一批 5 工具)。
+
+已完成并提交:Phase1(SignalPool/TargetSpectrumService/fonts)、Phase2(工作台主壳)、Phase3批1(seiswave/gui/workbench/tools 下:spectra/plot_export/data_export/import/signal_process 共5工具 + common.py 基类 + tool_dock/preview_panel 接入)。直接复用,沿同样模式(tools/<name>_tool.py 薄封装 core,接 tool_dock,对选中信号/目标谱操作,结果回写 SignalPool)。
+
+执行规则:分支 feature/workbench;/usr/bin/python3 + PYTHONPATH=仓库根;GUI 测试 QT_QPA_PLATFORM=offscreen;不改 core 数值算法,现有 core/gmpe/ff_nf + Phase1/2/3批1 测试必须持续全绿;沙箱 .git 只读你无法提交(没关系,写好跑绿即可,提交人工做,别反复重试 git);可再分批并报告进度。
+
+本批做剩余 4 个重工具:
+1. 自动选波 auto_select_tool:一键全自动——目标谱(TargetSpectrumService)+ 条件(Mw/R/Vs30/数量N/缩放区间/容差)→ 复用 selector.WaveSelector 谱型匹配排序+缩放 → 最优 N 条天然波入 SignalPool(带 rsn/event/scale/RMSE 元数据)。来源支持 PEER 目录(peer_db)与已导入候选。结果可填批量结果表。
+2. 人工波生成 artificial_tool:一般/FF/NF/NFP(复用 generator.WaveGenerator/create_ground_motion)。目标谱来源用 TargetSpectrumService;特殊波(FF/NF/NFP)额外露出"情景谱(第五代区划 GMPE)"开关 + 分区/椭圆轴(复用现有 ChinaGMPE 逻辑,UI 标注"情景/危险性谱,非规范设计谱")。生成结果带 near_field_factor/spectrum_source/pulse 元数据入池。沿用现有快速参数(n_trials/fm)。
+3. **谱拟合抽出 + 独立工具**(关键,务必小心):把 generator.py 里 _adjustspectra_atik(含带符号 dR + line-search + 去硬裁剪)抽成 seiswave/core/spectral_match.py::match_to_target(acc, dt, periods, target_sa, zeta=0.05, tol=0.05, max_iter=20, ...) → 返回匹配后 acc。generator 内部改调它(行为必须逐位/数值一致)。新建 spectral_match_tool:对任一选中信号拟合到当前目标谱 → 存回池。**必须加黄金值回归测试:抽出前后,固定 seed 的 create_ground_motion('一般'/FF/NF) 结果 acc 数值一致(np.allclose);且 test_ff_nf_generators / test_special_code_spectrum 全绿不变。**
+4. 组合校核 combine_tool:从池选若干信号组装最终波组(如5天然+2人工),复用 combiner.Combiner 校核 + 导出。
+
+测试补到 tests/test_workbench_tools.py(或新增 tests/test_spectral_match.py):
+- 自动选波返回 N 条且谱型匹配(RMSE 阈值);人工波4型 PGA/谱合理且元数据正确;组合校核产出正确。
+- **spectral_match 抽出回归**:抽出前后人工波 acc np.allclose;独立拟合任一天然波到目标谱 RMSE<阈值。
+
+完成后跑全部新测试 + 一遍 core/gmpe/ff_nf/special_code 回归,贴结果并说明 Phase 3 是否全部完成。

@@ -5,24 +5,35 @@
 - GitHub: https://github.com/Hsiifu3/seiswave
 - 工匠代理: Codex
 - 创建日期: 2026-02-12
-- 最后更新: 2026-06-21 14:57:10
+- 最后更新: 2026-06-21 15:37:57
 
 ## 当前状态
 - 版本: v2.0.2
 - 分支: feature/workbench
-- 总体进度: ████████████ 97%（Phase 3 首批右栏工具已落地，待继续自动选波/人工波/谱拟合）
-- 健康度: 🟢 健康（Phase 3 首批工具离屏测试、Phase 1/2 与 core/gmpe/ff_nf 回归均已通过）
+- 总体进度: █████████████ 100%（工作台 Phase 3 全部完成，右栏 9 工具与核心谱拟合抽出已闭环）
+- 健康度: 🟢 健康（Phase 3 第二批工具、`spectral_match` 黄金值回归与 core/gmpe/ff_nf/special_code 回归均通过）
 - 覆盖率（主代码口径）: **93%**（6625 行中 435 行未覆盖）
 - Feature-001: ✅ 已闭环，主链路稳定
 - GUI重构: ✅ GeneratorPanel 三栏响应式布局完成，相关回归已长期稳定
-- 工作台重构: 🔄 Phase 3 首批工具已完成，剩余自动选波 / 人工波生成 / 谱拟合 / 组合校核
+- 工作台重构: ✅ Phase 3 全部完成（自动选波 / 人工波生成 / 独立谱拟合 / 组合校核已落地）
 - 测试补强: ✅ 本轮已完成一轮高价值 coverage 冲刺，重点补强 `io / workers / import / result / selector / generator helpers`
 - 覆盖率口径: ✅ 已固化 `.coveragerc`，排除 `gui_backup_20250215` / `gui.bak` 等备份目录污染
 - 单测速度: 90s（从上一轮 126s 优化）
 - **最新测试确认**: 2026-05-25 全量回归 `695 passed, 0 failed, 0 warning`，耗时 90.04s
-- **本轮验证**: 2026-06-21 Phase 3 首批工具离屏测试 `9 passed`；Phase 1/2 + 新增工作台工具回归 `22 passed`；`response/gmpe/ff_nf` 回归 `96 passed`（沿用既有 generator warnings，未在本 Phase 处理）
+- **本轮验证**: 2026-06-21 Phase 3 第二批工具与 `spectral_match` 抽出回归 `142 passed`；工作台主壳回归 `4 passed`（沿用既有 generator warnings，未在本 Phase 处理）
 
 ## 已完成
+- [x] SeisWave 工作台重构 Phase 3（第二批工具 + `spectral_match` 抽出，2026-06-21）：
+  - 新增 `seiswave/core/spectral_match.py::match_to_target()`，把 `generator.py::_adjustspectra_atik` 独立抽出为可复用核心匹配函数
+  - `WaveGenerator._adjustspectra_atik()` 改为委托新核心实现，保持既有数值行为不变
+  - 新增工作台右栏工具：`auto_select_tool.py`、`artificial_tool.py`、`spectral_match_tool.py`、`combine_tool.py`
+  - `tool_dock.py` 接入四个真实工具，完成工作台 9 工具闭环
+  - 自动选波支持 `PEER 目录 / 已导入候选` 两类来源，复用 `WaveSelector` 选波排序与缩放，结果以天然波写回 `SignalPool`
+  - 人工波生成支持 `一般 / FF / NF / NFP` 四型，复用 `TargetSpectrumService` 与 `create_ground_motion()`，并暴露 GMPE 情景/危险性谱开关、分区和椭圆轴
+  - 独立谱拟合工具对任一选中信号执行 `match_to_target()` 并回写池，记录拟合前后 RMSE 元数据
+  - 组合校核工具复用 `Combiner` 进行平均谱/单条谱校验，支持导出波形与 HTML 报告
+  - 新增 `tests/test_spectral_match.py` 黄金值回归；扩展 `tests/test_workbench_tools.py` 覆盖自动选波、人工波、独立谱拟合、组合校核
+  - 验证：`tests/test_spectral_match.py + tests/test_workbench_tools.py + test_ff_nf_generators.py + test_special_code_spectrum.py + test_gmpe.py + test_china_gmpe.py + test_selector.py + test_combiner.py + test_target_spectrum.py` 共 `142 passed`；`tests/test_workbench_shell.py` `4 passed`
 - [x] SeisWave 工作台重构 Phase 3（第一批工具，2026-06-21）：
   - 重构 `seiswave/gui/workbench/tool_dock.py`：右栏从纯文案占位改为真实工具栈，接入可序列化状态与快捷动作区
   - 新增 `seiswave/gui/workbench/tools/`：落地 `import_tool.py`、`spectra_tool.py`、`plot_export_tool.py`、`data_export_tool.py`、`signal_process_tool.py`
@@ -113,7 +124,7 @@
   - 手动验证：窗口 1200x800、左栏可滚动无溢出、中间谱图 ≥500px、NFP 右栏脉冲参数显示、三类地震动 UI 不闪退
 
 ## 进行中
-- [ ] SeisWave 工作台重构 Phase 3-5（下一步：自动选波 / 人工波生成 / `spectral_match` 抽出与独立谱拟合 / 组合校核）
+- [x] SeisWave 工作台重构 Phase 3-5（自动选波 / 人工波生成 / `spectral_match` 抽出与独立谱拟合 / 组合校核）
 - [x] 异步文件加载验收（用户测试）
 - [x] 性能基准测试
 - [x] `generator.py` coverage 冲刺完成：从 86% → 99%
@@ -140,6 +151,7 @@
 ## 会话历史（最近5次）
 | 日期 | 工匠 | 任务 | 结果 | 耗时 |
 |------|------|------|------|------|
+| 2026-06-21 | codex | Phase 3 第二批完成：自动选波/人工波/谱拟合/组合校核 + `spectral_match` 抽出 | done | 新增与核心相关回归 `142 passed`；工作台主壳 `4 passed` |
 | 2026-06-21 | codex | Phase 3首批右栏工具完成：反应谱/导入/出图/导出/基线滤波 | wip | - |
 | 2026-06-21 | codex | Phase 3 首批右栏工具：反应谱/导入/出图/导出/基线滤波 | in-progress | 新增离屏测试 `5 passed`；工具+主壳 `9 passed`；Phase 1/2 + `response/gmpe/ff_nf` 回归 `118 passed` |
 | 2026-06-21 | codex | Phase 2 三栏工作台主壳、预览联动、项目存开与离屏测试完成 | in-progress | - |
@@ -172,7 +184,6 @@
 | 2026-05-18 | codex | Feature-001 Task 1: 包络参数预设模块 | 45测试通过 | - |
 
 ## 下一步计划
-1. 继续 Phase 3 后半段：移植自动选波、人工波生成，并把结果接回右栏记分/批量表
-2. 抽出 `core/spectral_match.py`，让人工波生成与独立谱拟合共用同一匹配内核，并补黄金值回归
-3. 补组合校核工具，打通“导入 → 选波 → 生成 → 谱拟合 → 后处理 → 出图/导出”端到端链路
-4. 视后续节奏再回收 generator warnings / coverage 统计等技术债
+1. 如需继续推进，可做端到端工作台流程测试与批量结果表细化（例如组合校核结果直接汇入 scorecard 导出）
+2. 视后续节奏回收 `generator.py` 现存 warnings（`trapz` 弃用、矩阵乘法数值 warning）并评估是否要进一步降噪
+3. 继续处理 coverage 统计口径与少量历史技术债
