@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -54,6 +55,7 @@ class PreviewPanel(QWidget):
         self._target_label: QLabel | None = None
         self._triple_log_check: QCheckBox | None = None
         self._logx_check: QCheckBox | None = None
+        self._triple_window = None
         self._damping_combo: QComboBox | None = None
         self._acc_plot: PlotWidget | None = None
         self._vel_plot: PlotWidget | None = None
@@ -74,6 +76,10 @@ class PreviewPanel(QWidget):
         self._target_label = QLabel("目标谱：未设置目标谱")
         self._target_label.setWordWrap(True)
         self._triple_log_check = QCheckBox("三联对数图")
+        self._triple_log_check.setVisible(False)  # 内联三联已退役，改用独立弹窗
+        self._triple_btn = QPushButton("三联对数图…")
+        self._triple_btn.setToolTip("在独立窗口查看 Sa/Sv/Sd 三联对数反应谱")
+        self._triple_btn.clicked.connect(self._open_triple_window)
         self._logx_check = QCheckBox("对数X轴")
         self._damping_combo = QComboBox()
         self._damping_combo.addItem("单阻尼 5%", "single")
@@ -82,7 +88,7 @@ class PreviewPanel(QWidget):
         header.addSpacing(12)
         header.addWidget(self._target_label, 1)
         header.addWidget(self._logx_check)
-        header.addWidget(self._triple_log_check)
+        header.addWidget(self._triple_btn)
         header.addWidget(self._damping_combo)
         root.addLayout(header)
 
@@ -366,6 +372,34 @@ class PreviewPanel(QWidget):
 
         axes[0].legend(fontsize=8, framealpha=0.85, loc="best")
         self._spectrum_plot.refresh()
+
+    def spectra_data(self):
+        """返回 (periods, target_sa, zetas, spectra_by_zeta) 供三联弹窗复用；无数据返回 None。"""
+        records = self._pool.selection()
+        target_sa = self._target_service.sa()
+        if not records and target_sa.size == 0:
+            return None
+        periods = self._resolve_periods()
+        base_zeta = float(self._target_service.zeta())
+        zetas = self._selected_zetas(base_zeta)
+        spectra_by_zeta = self._mean_spectra(records, periods, zetas)
+        return periods, target_sa, zetas, spectra_by_zeta
+
+    def zeta_label(self, zeta: float) -> str:
+        return self._format_zeta(zeta)
+
+    def _open_triple_window(self) -> None:
+        """打开（或前置）独立的三联对数反应谱窗口。"""
+        from .triple_spectrum_window import TripleSpectrumWindow
+
+        if self._triple_window is None:
+            self._triple_window = TripleSpectrumWindow(
+                self, self._pool, self._target_service, dark=self._dark, parent=self
+            )
+        self._triple_window.refresh()
+        self._triple_window.show()
+        self._triple_window.raise_()
+        self._triple_window.activateWindow()
 
     def _resolve_periods(self) -> np.ndarray:
         target_periods = self._target_service.periods()
