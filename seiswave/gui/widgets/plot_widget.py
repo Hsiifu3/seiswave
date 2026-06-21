@@ -38,11 +38,12 @@ class PlotCanvas(FigureCanvasQTAgg):
     def __init__(self, parent=None, width=8, height=5, dpi=100, dark=False):
         self._dark = dark
         colors = get_mpl_colors(dark)
+        # constrained_layout 专为窄/短子图设计：自动给旋转 y 轴标签+刻度留够位置，
+        # 不像 tight_layout 在图变矮时失败、导致标签与刻度重叠显示不全。
         self.fig = Figure(figsize=(width, height), dpi=dpi,
-                          facecolor=colors['bg'])
+                          facecolor=colors['bg'], constrained_layout=True)
         self.ax = self.fig.add_subplot(111)
         self._apply_style(self.ax, colors)
-        self.fig.tight_layout(pad=2.0)
         super().__init__(self.fig)
         self.setParent(parent)
 
@@ -77,7 +78,7 @@ class PlotCanvas(FigureCanvasQTAgg):
         self.refresh()
 
     def refresh(self):
-        self.fig.tight_layout(pad=2.0)
+        # constrained_layout 在 draw 时自动重排，无需再调 tight_layout
         self.draw()
 
     def set_dark(self, dark):
