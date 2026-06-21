@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QProgressBar,
+    QPushButton,
     QSplitter,
     QStatusBar,
     QToolBar,
@@ -28,6 +29,7 @@ from . import get_signal_pool, get_target_spectrum_service
 from .preview_panel import PreviewPanel
 from .project_io import ProjectIO
 from .signal_pool_panel import SignalPoolPanel
+from .target_dialog import TargetSpectrumDialog
 from .tool_dock import ToolDock
 
 
@@ -112,6 +114,9 @@ class AppWindow(QMainWindow):
         self._toolbar_target_label = QLabel(self._target_service.describe())
         self._toolbar_target_label.setMinimumWidth(280)
         toolbar.addWidget(self._toolbar_target_label)
+        target_btn = QPushButton("设置目标谱…")
+        target_btn.clicked.connect(self.open_target_dialog)
+        toolbar.addWidget(target_btn)
 
     def _setup_central(self) -> None:
         central = QWidget()
@@ -155,6 +160,16 @@ class AppWindow(QMainWindow):
         save_action.setShortcut(QKeySequence.Save)
         save_action.triggered.connect(self.save_project_dialog)
         project_menu.addAction(save_action)
+
+        target_menu = self.menuBar().addMenu("目标谱(&T)")
+        set_target_action = QAction("设置目标谱…", self)
+        set_target_action.triggered.connect(self.open_target_dialog)
+        target_menu.addAction(set_target_action)
+
+    def open_target_dialog(self) -> None:
+        """打开目标谱设置对话框。"""
+        dialog = TargetSpectrumDialog(self._pool, self._target_service, self)
+        dialog.exec()
 
     def _setup_statusbar(self) -> None:
         statusbar = QStatusBar(self)

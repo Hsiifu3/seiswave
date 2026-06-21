@@ -16,6 +16,7 @@ from seiswave.core.target_spectrum import TargetSpectrumService
 from seiswave.gui.workbench.app_window import AppWindow
 from seiswave.gui.workbench.tool_worker import ToolJobWorker
 from seiswave.gui.workbench.tools.data_export_tool import _safe_stem
+from seiswave.gui.workbench.target_dialog import TargetSpectrumDialog
 
 
 @pytest.fixture(scope="module")
@@ -244,3 +245,54 @@ class TestSafeStem:
     )
     def test_safe_stem(self, raw, expected_clean):
         assert _safe_stem(raw) == expected_clean
+
+
+# ---------------------------------------------------------------- 目标谱设置入口
+
+class TestTargetSpectrumDialog:
+    def test_code_mode_sets_target(self, qapp):
+        window, pool, target, _ = _build_window()
+        try:
+            target.clear()
+            dlg = TargetSpectrumDialog(pool, target, window)
+            dlg._mode_combo.setCurrentIndex(0)  # 规范设计谱
+            dlg._apply()
+            assert target.source() == "code"
+            assert target.sa().size > 0
+            assert "GB50011" in target.describe()
+        finally:
+            window.close()
+
+    def test_record_mode_sets_target(self, qapp):
+        window, pool, target, rec = _build_window()
+        try:
+            target.clear()
+            dlg = TargetSpectrumDialog(pool, target, window)
+            dlg._mode_combo.setCurrentIndex(1)  # 从选中信号
+            dlg._apply()
+            assert target.source() == "record"
+            assert target.sa().size > 0
+        finally:
+            window.close()
+
+    def test_custom_mode_empty_path_warns(self, qapp, monkeypatch):
+        window, pool, target, _ = _build_window()
+        try:
+            target.clear()
+            from PySide6.QtWidgets import QMessageBox
+
+            monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *a, **k: None))
+            dlg = TargetSpectrumDialog(pool, target, window)
+            dlg._mode_combo.setCurrentIndex(2)  # 自定义文件
+            dlg._apply()  # 空路径 → 报错、不设置
+            assert target.source() is None
+        finally:
+            window.close()
+
+    def test_app_window_has_target_entry(self, qapp):
+        window, pool, target, _ = _build_window()
+        try:
+            assert hasattr(window, "open_target_dialog")
+        finally:
+            window.close()
+
