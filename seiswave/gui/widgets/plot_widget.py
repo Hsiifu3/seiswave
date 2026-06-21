@@ -49,7 +49,10 @@ class PlotCanvas(FigureCanvasQTAgg):
 
     def _apply_style(self, ax, colors):
         ax.set_facecolor(colors['axes_bg'])
-        ax.tick_params(colors=colors['fg'], labelsize=10)
+        ax.tick_params(colors=colors['fg'], labelsize=9)
+        # 限制 y 轴刻度数量，避免矮图上刻度数字挤在一起
+        from matplotlib.ticker import MaxNLocator
+        ax.yaxis.set_major_locator(MaxNLocator(nbins=4, prune=None))
         ax.xaxis.label.set_color(colors['fg'])
         ax.yaxis.label.set_color(colors['fg'])
         ax.title.set_color(colors['fg'])

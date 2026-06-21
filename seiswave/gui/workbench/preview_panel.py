@@ -89,7 +89,7 @@ class PreviewPanel(QWidget):
         self._vel_plot = PlotWidget(show_toolbar=False, dark=self._dark)
         self._disp_plot = PlotWidget(show_toolbar=False, dark=self._dark)
         for _p in (self._acc_plot, self._vel_plot, self._disp_plot):
-            _p.setMinimumHeight(120)  # 防止三联时程被压扁，留呼吸空间
+            _p.setMinimumHeight(150)  # 防止三联时程被压扁，留呼吸空间
         motion_splitter.addWidget(self._acc_plot)
         motion_splitter.addWidget(self._vel_plot)
         motion_splitter.addWidget(self._disp_plot)

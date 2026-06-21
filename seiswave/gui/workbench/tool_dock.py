@@ -59,6 +59,7 @@ class ToolDock(QWidget):
         self._plot_export_tool: PlotExportTool | None = None
         self._data_export_tool: DataExportTool | None = None
         self._active_worker: ToolJobWorker | None = None
+        self._finalize_fn = None
         self._setup_ui()
         self._register_tools()
         self.set_current_tool(self._current_tool)
@@ -218,36 +219,55 @@ class ToolDock(QWidget):
         tool_name = self._current_tool
         worker = ToolJobWorker(compute)
         self._active_worker = worker
+        self._finalize_fn = finalize
         worker.signals.progress.connect(
             lambda pct, text: self.progress_changed.emit(pct, text or "处理中…")
         )
         worker.signals.finished.connect(
-            lambda payload: self._on_worker_finished(tool_name, finalize, payload)
+            lambda payload: self._on_worker_finished(tool_name, payload)
         )
         worker.signals.error.connect(
             lambda message: self._on_worker_error(tool_name, message)
         )
-        worker.finished.connect(worker.deleteLater)
+        # QThread.finished 在 run() 完全返回后才触发，是唯一安全的清理点；
+        # 在此之前绝不丢弃 worker 引用，否则线程仍在运行就被销毁 → 崩溃。
+        worker.finished.connect(self._on_thread_finished)
         self._set_running(True, tool_name)
         worker.start()
 
-    def _on_worker_finished(self, tool_name: str, finalize, payload) -> None:
-        self._set_running(False, tool_name)
+    def _on_worker_finished(self, tool_name: str, payload) -> None:
+        # 仍处于 worker.run() 内（QueuedConnection），只做 finalize，不清理线程
+        finalize = self._finalize_fn
+        if finalize is None:
+            return
         try:
             finalize(payload)
         except Exception as exc:  # finalize 在 GUI 线程，安全弹窗
             QMessageBox.critical(self, tool_name, str(exc))
 
     def _on_worker_error(self, tool_name: str, message: str) -> None:
-        self._set_running(False, tool_name)
         if message == "用户取消":
             self.message_requested.emit(f"{tool_name} 已取消")
             return
         QMessageBox.critical(self, tool_name, message)
 
+    def _on_thread_finished(self) -> None:
+        # run() 已完全返回，此时清空引用并删除才安全
+        worker = self._active_worker
+        self._active_worker = None
+        self._finalize_fn = None
+        self._set_running(False, self._current_tool)
+        if worker is not None:
+            worker.deleteLater()
+
+    def shutdown(self) -> None:
+        """关闭前调用：等待运行中的 worker 收尾，避免线程仍在运行就被销毁。"""
+        worker = self._active_worker
+        if worker is not None and worker.isRunning():
+            worker.cancel()
+            worker.wait(5000)
+
     def _set_running(self, running: bool, tool_name: str) -> None:
-        if not running:
-            self._active_worker = None
         if self._run_button is not None:
             if running:
                 self._run_button.setText("■ 取消")

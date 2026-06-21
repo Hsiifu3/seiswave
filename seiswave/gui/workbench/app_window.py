@@ -171,6 +171,12 @@ class AppWindow(QMainWindow):
         dialog = TargetSpectrumDialog(self._pool, self._target_service, self)
         dialog.exec()
 
+    def closeEvent(self, event) -> None:
+        """关闭前等待运行中的工具任务收尾，避免线程被销毁导致崩溃。"""
+        if self._tool_dock is not None:
+            self._tool_dock.shutdown()
+        super().closeEvent(event)
+
     def _setup_statusbar(self) -> None:
         statusbar = QStatusBar(self)
         self.setStatusBar(statusbar)
