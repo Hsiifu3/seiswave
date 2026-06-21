@@ -143,6 +143,49 @@ class TestAsyncHarness:
         finally:
             window.close()
 
+    def _run_threaded(self, qapp, window, timeout=20000):
+        from PySide6.QtCore import QEventLoop, QTimer
+
+        worker = window._tool_dock._active_worker
+        if worker is None:
+            return
+        loop = QEventLoop()
+        worker.finished.connect(loop.quit)
+        QTimer.singleShot(timeout, loop.quit)
+        loop.exec()
+        qapp.processEvents()
+        qapp.processEvents()
+
+    def test_real_thread_run_completes_and_cleans_up(self, qapp):
+        # 真 .start() 线程路径：复现并防止 "QThread destroyed while running" 闪退
+        window, pool, target, _ = _build_window()
+        try:
+            window.set_current_tool("人工波生成")
+            tool = window._tool_dock._tool_widgets["人工波生成"]
+            tool._type_combo.setCurrentIndex(tool._type_combo.findData("general"))
+            tool._n_spin.setValue(256)
+            tool._iter_spin.setValue(3)
+            before = len(pool.all())
+            window._tool_dock._run_current_tool()
+            assert window._tool_dock._active_worker is not None
+            self._run_threaded(qapp, window)
+            assert window._tool_dock._active_worker is None  # 已安全清理
+            assert len(pool.all()) == before + 1
+        finally:
+            window.close()
+
+    def test_close_while_worker_running_no_crash(self, qapp):
+        window, pool, target, _ = _build_window()
+        window.set_current_tool("人工波生成")
+        tool = window._tool_dock._tool_widgets["人工波生成"]
+        tool._type_combo.setCurrentIndex(tool._type_combo.findData("general"))
+        tool._n_spin.setValue(1024)
+        tool._iter_spin.setValue(20)
+        window._tool_dock._run_current_tool()
+        assert window._tool_dock._active_worker is not None
+        window.close()  # closeEvent → shutdown() 等待线程收尾，不应崩溃
+        qapp.processEvents()
+
 
 # ---------------------------------------------------------------- #2 滤波 Nyquist
 
