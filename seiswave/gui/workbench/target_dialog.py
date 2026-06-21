@@ -32,7 +32,11 @@ _INTENSITY_ITEMS = [
 ]
 _GROUP_ITEMS = [("第一组", 1), ("第二组", 2), ("第三组", 3)]
 _SITE_ITEMS = [("I0 类", "I0"), ("I1 类", "I1"), ("II 类", "II"), ("III 类", "III"), ("IV 类", "IV")]
-_LEVEL_ITEMS = [("多遇地震(小震)", "frequent"), ("设防地震(中震)", "basic"), ("罕遇地震(大震)", "rare")]
+_LEVEL_ITEMS = [
+    ("多遇地震(小震, 选波标准谱)", "frequent"),
+    ("罕遇地震(大震)", "rare"),
+    ("设防地震(中震, 近似·规范未列表)", "basic"),
+]
 _CODE_ITEMS = [("GB50011 建筑抗震设计", "GB50011"), ("GB/T51408 隔震设计", "GBT51408")]
 
 
@@ -91,11 +95,11 @@ class TargetSpectrumDialog(QDialog):
         self._site_combo = _combo(_SITE_ITEMS)
         self._level_combo = _combo(_LEVEL_ITEMS)
         self._code_zeta = _zeta_spin()
-        # 默认 8 度 / 第二组 / II 类 / 设防
+        # 默认 8 度 / 第二组 / II 类 / 多遇(选波标准谱)
         self._intensity_combo.setCurrentIndex(3)
         self._group_combo.setCurrentIndex(1)
         self._site_combo.setCurrentIndex(2)
-        self._level_combo.setCurrentIndex(1)
+        self._level_combo.setCurrentIndex(0)
         form.addRow("规范:", self._code_combo)
         form.addRow("设防烈度:", self._intensity_combo)
         form.addRow("设计地震分组:", self._group_combo)

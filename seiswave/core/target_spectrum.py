@@ -64,7 +64,7 @@ class TargetSpectrumService(QObject):
             "intensity": 8,
             "group": 2,
             "site_class": "II",
-            "level": "basic",
+            "level": "frequent",
         }
         defaults.update(params)
 

@@ -53,6 +53,7 @@ class PreviewPanel(QWidget):
         self._selection_label: QLabel | None = None
         self._target_label: QLabel | None = None
         self._triple_log_check: QCheckBox | None = None
+        self._logx_check: QCheckBox | None = None
         self._damping_combo: QComboBox | None = None
         self._acc_plot: PlotWidget | None = None
         self._vel_plot: PlotWidget | None = None
@@ -73,12 +74,14 @@ class PreviewPanel(QWidget):
         self._target_label = QLabel("目标谱：未设置目标谱")
         self._target_label.setWordWrap(True)
         self._triple_log_check = QCheckBox("三联对数图")
+        self._logx_check = QCheckBox("对数X轴")
         self._damping_combo = QComboBox()
         self._damping_combo.addItem("单阻尼 5%", "single")
         self._damping_combo.addItem("多阻尼 2% / 5% / 10%", "multi")
         header.addWidget(self._selection_label)
         header.addSpacing(12)
         header.addWidget(self._target_label, 1)
+        header.addWidget(self._logx_check)
         header.addWidget(self._triple_log_check)
         header.addWidget(self._damping_combo)
         root.addLayout(header)
@@ -108,6 +111,7 @@ class PreviewPanel(QWidget):
         root.addWidget(lower_splitter, 4)
 
         self._triple_log_check.toggled.connect(self._refresh_spectrum_only)
+        self._logx_check.toggled.connect(self._refresh_spectrum_only)
         self._damping_combo.currentIndexChanged.connect(self._refresh_spectrum_only)
 
     def _connect_services(self) -> None:
@@ -120,6 +124,7 @@ class PreviewPanel(QWidget):
         assert self._damping_combo is not None
         return {
             "triple_log": self._triple_log_check.isChecked(),
+            "logx": self._logx_check.isChecked() if self._logx_check is not None else False,
             "damping_mode": self._damping_combo.currentData(),
         }
 
@@ -130,6 +135,8 @@ class PreviewPanel(QWidget):
         assert self._triple_log_check is not None
         assert self._damping_combo is not None
         self._triple_log_check.setChecked(bool(state.get("triple_log", False)))
+        if self._logx_check is not None:
+            self._logx_check.setChecked(bool(state.get("logx", False)))
         mode = str(state.get("damping_mode", "single"))
         index = self._damping_combo.findData(mode)
         if index >= 0:
@@ -248,11 +255,32 @@ class PreviewPanel(QWidget):
                     color=palette[index % len(palette)],
                     linewidth=1.0,
                     alpha=0.85,
-                    label=record.name or f"信号 {index + 1}",
+                    label=self._record_label(record, index),
                 )
             if len(records) <= 5:
                 axis.legend(fontsize=8, framealpha=0.85, loc="upper right")
             plot.refresh()
+
+    def _record_label(self, record: SignalRecord, index: int) -> str:
+        """图例标签：天然波用名称，特殊波附带类型/近场系数/脉冲，便于区分。"""
+        base = record.name or f"信号 {index + 1}"
+        meta = record.meta or {}
+        gtype = meta.get("generation_type")
+        tags: list[str] = []
+        if gtype in {"FF", "NF", "NFP"}:
+            tags.append(gtype)
+            factor = meta.get("near_field_factor")
+            try:
+                factor = float(factor)
+            except (TypeError, ValueError):
+                factor = None
+            if factor and abs(factor - 1.0) > 1e-6:
+                tags.append(f"近场×{factor:.2f}")
+            if meta.get("pulse"):
+                tags.append("脉冲")
+        if tags:
+            return f"{base} [{'·'.join(tags)}]"
+        return base
 
     def _refresh_spectrum_only(self) -> None:
         records = self._pool.selection()
@@ -400,8 +428,12 @@ class PreviewPanel(QWidget):
         else:
             axis = fig.add_subplot(111)
             self._spectrum_plot.canvas._apply_style(axis, colors)
-            axis.set_xlim(float(np.min(periods)), float(np.max(periods)))
-            axis.set_xscale("log")
+            if self._logx_check is not None and self._logx_check.isChecked():
+                axis.set_xscale("log")
+                axis.set_xlim(float(np.min(periods)), float(np.max(periods)))
+            else:
+                axis.set_xscale("linear")
+                axis.set_xlim(0.0, float(np.max(periods)))
             axis.set_xlabel("周期 T (s)", fontsize=9)
             axis.set_ylabel("Sa", fontsize=9)
             axes = [axis]

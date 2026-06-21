@@ -152,6 +152,7 @@ class TestWorkbenchShell:
                 assert new_window._tool_dock.current_tool() == "谱拟合"
                 assert new_window._preview_panel.state() == {
                     "triple_log": True,
+                    "logx": False,
                     "damping_mode": "multi",
                 }
             finally:
