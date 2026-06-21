@@ -5,22 +5,30 @@
 - GitHub: https://github.com/Hsiifu3/seiswave
 - 工匠代理: Codex
 - 创建日期: 2026-02-12
-- 最后更新: 2026-05-25 17:07:00
+- 最后更新: 2026-06-21 12:01:08
 
 ## 当前状态
 - 版本: v2.0.2
-- 分支: main
+- 分支: feature/workbench
 - 总体进度: ████████████ 95%（GUI 4项修复 + Fortran 混合路径已落地）
-- 健康度: 🟢 健康（全量 `695 passed, 0 warning`）
+- 健康度: 🟢 健康（Phase 1 新增测试与 core/gmpe/ff_nf 回归均已通过）
 - 覆盖率（主代码口径）: **93%**（6625 行中 435 行未覆盖）
 - Feature-001: ✅ 已闭环，主链路稳定
 - GUI重构: ✅ GeneratorPanel 三栏响应式布局完成，相关回归已长期稳定
+- 工作台重构: 🔄 Phase 1/5 已完成，Phase 2 主壳开发待继续
 - 测试补强: ✅ 本轮已完成一轮高价值 coverage 冲刺，重点补强 `io / workers / import / result / selector / generator helpers`
 - 覆盖率口径: ✅ 已固化 `.coveragerc`，排除 `gui_backup_20250215` / `gui.bak` 等备份目录污染
 - 单测速度: 90s（从上一轮 126s 优化）
 - **最新测试确认**: 2026-05-25 全量回归 `695 passed, 0 failed, 0 warning`，耗时 90.04s
+- **本轮验证**: 2026-06-21 Phase 1 新增单测 `13 passed`；既有 core/gmpe/ff_nf 回归 `156 passed`（沿用既有 warnings，未在本 Phase 处理）
 
 ## 已完成
+- [x] SeisWave 工作台重构 Phase 1（2026-06-21）：
+  - 新增 `seiswave/core/signal_pool.py`：`SignalRecord` 惰性 `vel/disp/spectrum` 缓存、`SignalPool` 增删/选中/derive/provenance
+  - 新增 `seiswave/core/target_spectrum.py`：`TargetSpectrumService` 支持规范谱 / 从记录算 / 自定义文件三源切换
+  - 新增 `seiswave/gui/fonts.py`：按平台选择 `SimSun` / `Songti SC` / 回退字体，并封装 Matplotlib / Qt 字体配置
+  - 新增 `tests/test_signal_pool.py`、`tests/test_target_spectrum.py`、`tests/test_fonts.py`
+  - 验证：Phase 1 单测 `13 passed`；既有 core/gmpe/ff_nf 回归 `156 passed`
 - [x] GUI 紧急修复 4 项 + Fortran 混合路径（2026-05-21）：
   - **问题1：持时控制**：param_form.py 新增 `持时 (s)` QDoubleSpinBox（10-300s，默认40s），持时/Δt 双向联动自动计算 n = round(持时/dt)，数据点数设为只读显示
   - **问题2：目标谱传递**：generator_panel.py `set_code_spectrum` 同步更新 param_form 目标谱信息标签（"已设置 (N点, PGA=X.XXXg)"）；空谱时禁用生成并弹窗提示
@@ -86,6 +94,7 @@
   - 手动验证：窗口 1200x800、左栏可滚动无溢出、中间谱图 ≥500px、NFP 右栏脉冲参数显示、三类地震动 UI 不闪退
 
 ## 进行中
+- [ ] SeisWave 工作台重构 Phase 2-5（下一步：三栏工作台主壳、中央预览、项目存开）
 - [x] 异步文件加载验收（用户测试）
 - [x] 性能基准测试
 - [x] `generator.py` coverage 冲刺完成：从 86% → 99%
@@ -100,6 +109,7 @@
 ## 阻塞/风险
 | 问题 | 严重程度 | 状态 | 备注 |
 |------|---------|------|------|
+| 当前沙箱将 `.git` 目录设为只读，`git add` 无法创建 `.git/index.lock`，因此 Phase 1 代码虽已完成但暂时无法提交 | 高 | 🚧 活跃 | 已完成代码与测试；需放开 `.git` 写权限后补提 `feat(workbench): Phase 1 信号池、目标谱服务与字体封装` |
 | Fortran 时域法速度未达预期 | 低 | 观察 | n=2000/100periods 工况下 Fortran adjustspectra 12.9s ≈ Python 9.1s，优势不明显；频域法 fm=0 仍是首选 |
 | 4 个 flaky 测试 | 低 | 已知 | `test_ramixed_dispatches*`, `test_generator_worker_inprocess_path`, `test_multi_trial_worker_mock_trial` 为测试隔离污染，单独运行均通过 |
 
@@ -111,6 +121,8 @@
 ## 会话历史（最近5次）
 | 日期 | 工匠 | 任务 | 结果 | 耗时 |
 |------|------|------|------|------|
+| 2026-06-21 | codex | Phase 1完成但提交受阻：.git 目录只读 | blocked | - |
+| 2026-06-21 | codex | Phase 1代码完成：信号池/目标谱服务/字体封装与测试 | 新增测试 `13 passed`；core/gmpe/ff_nf 回归 `156 passed`，但 `.git` 只读导致本 Phase 无法提交 | - |
 | 2026-05-21 | codex | GUI 4项用户体验修复 | done | - |
 | 2026-05-21 | codex | GUI 4项用户体验修复 + Fortran混合路径 | done | - |
 | 2026-05-21 | codex | GUI 4项用户体验修复 | done | - |
@@ -137,7 +149,7 @@
 | 2026-05-18 | codex | Feature-001 Task 1: 包络参数预设模块 | 45测试通过 | - |
 
 ## 下一步计划
-1. 观察 Fortran 时域法在实际大工况（n=8192, 200+ periods）下的速度表现
-2. 用户验收异步加载功能
-3. 固化一版排除备份目录的 coverage 统计口径
-4. 考虑 v2.1 功能规划
+1. 进入工作台重构 Phase 2：实现三栏主壳、中央 a/v/d + 反应谱预览、项目存开
+2. 在 Phase 2 结束后补离屏 GUI 测试，并继续串跑既有 core 回归
+3. Phase 3 再抽离谱拟合薄封装并补人工波结果一致性回归
+4. 视后续节奏再回收历史 coverage / warning 技术债
