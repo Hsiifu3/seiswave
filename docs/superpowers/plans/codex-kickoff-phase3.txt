@@ -1,0 +1,26 @@
+继续 SeisWave 工作台重构,现在做 Phase 3(逐个移植 8 个独立工具到右栏工具容器)。
+
+先读计划 docs/superpowers/plans/2026-06-21-seiswave-redesign-plan.md 的 Phase 3 章节(含工具顺序、抽出 spectral_match、每工具测试要点),以及设计 §2.2/§2.3。
+
+前提:Phase 1(SignalPool/TargetSpectrumService/fonts)、Phase 2(gui/workbench 主壳:app_window/signal_pool_panel/preview_panel/scorecard/tool_dock/project_io)已完成并提交,直接复用。每个工具放 seiswave/gui/workbench/tools/<name>_tool.py,薄封装现有 core,接进右栏 tool_dock,对"选中信号/目标谱"操作,结果回写 SignalPool。
+
+执行规则(务必遵守):
+1. 分支 feature/workbench。
+2. /usr/bin/python3 + export PYTHONPATH=/Users/yachiyo/Developer/seiswave:$PYTHONPATH;GUI 测试 QT_QPA_PLATFORM=offscreen。
+3. 不改 core 数值算法;现有 core/gmpe/ff_nf + Phase1/2 测试必须持续全绿。
+4. 沙箱 .git 只读,你无法 git 提交——没关系,只管把代码和测试写好跑绿,提交由人工 review 后完成,不要反复重试 git。
+5. 体量大,可分批;每批完成跑该批测试 + 一遍既有回归并贴结果。允许只完成部分工具,但要说明完成到哪、剩哪些。
+
+Phase 3 按计划顺序(每个 = tools/<name>_tool.py + 测试):
+1. 反应谱工具(Spectra,推 preview)
+2. 快捷出图(a/v/d/谱 → PNG/PDF/SVG,fonts 已配)
+3. 数据导出(acc/vel/disp/谱 → CSV/TXT/AT2;批量结果表 → CSV)
+4. 导入(PEER 目录/AT2/TXT → pool)
+5. 自动选波(一键全自动:目标谱+条件 → WaveSelector 谱型匹配排序+缩放 → 最优 N 条入 pool)
+6. 人工波生成(一般/FF/NF/NFP;特殊波露出"情景谱 第五代区划GMPE"+分区/椭圆轴,标注情景谱;结果带 near_field_factor/spectrum_source/pulse 元数据入 pool)
+7. 谱拟合/调整(独立):把 generator._adjustspectra_atik(含 line-search)抽成 core/spectral_match.py::match_to_target(acc,dt,periods,target_sa,...);人工波生成内部改调它;新工具可对任一选中信号拟合到目标谱→存回 pool。**抽出后人工波结果须与抽出前一致,加黄金值回归测试**。
+8. 基线校正 / 滤波(EQSignal.baseline_correction / Filter → derive 存回 pool)
+
+测试 tests/test_workbench_tools.py(offscreen+逻辑):每工具给定选中信号/目标谱→产出正确(谱匹配 RMSE 阈值;导出文件落盘且可回读;选波返回 N 条且谱型匹配;生成 4 型 PGA/谱合理;基线/滤波改变信号且记 provenance);spectral_match 抽出回归(人工波结果与抽出前一致)。
+
+完成(或分批完成)后跑测试并贴结果,说明完成进度。

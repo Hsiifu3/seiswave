@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from pathlib import Path
 import warnings
 
 import numpy as np
@@ -45,6 +46,10 @@ class PreviewPanel(QWidget):
         self._target_service = target_service
         self._dark = dark
         self._spectrum_axes = []
+        self._last_spectrum_periods = np.array([], dtype=np.float64)
+        self._last_target_sa = np.array([], dtype=np.float64)
+        self._last_zetas: list[float] = []
+        self._last_mean_spectra: dict[float, dict[str, np.ndarray]] = {}
         self._selection_label: QLabel | None = None
         self._target_label: QLabel | None = None
         self._triple_log_check: QCheckBox | None = None
@@ -132,6 +137,68 @@ class PreviewPanel(QWidget):
         """返回当前谱图的 Matplotlib 轴列表。"""
         return list(self._spectrum_axes)
 
+    def set_spectrum_options(
+        self,
+        *,
+        triple_log: bool | None = None,
+        damping_mode: str | None = None,
+    ) -> None:
+        """按工具参数更新谱图选项。"""
+        assert self._triple_log_check is not None
+        assert self._damping_combo is not None
+        if triple_log is not None:
+            self._triple_log_check.setChecked(bool(triple_log))
+        if damping_mode is not None:
+            index = self._damping_combo.findData(damping_mode)
+            if index >= 0:
+                self._damping_combo.setCurrentIndex(index)
+        self._refresh_spectrum_only()
+
+    def plot_widget(self, kind: str) -> PlotWidget:
+        """返回指定预览图的 PlotWidget。"""
+        widget_map = {
+            "acc": self._acc_plot,
+            "vel": self._vel_plot,
+            "disp": self._disp_plot,
+            "spectrum": self._spectrum_plot,
+        }
+        widget = widget_map.get(kind)
+        if widget is None:
+            raise ValueError(f"未知预览图类型: {kind}")
+        return widget
+
+    def export_plot(self, kind: str, path: str | Path, dpi: int = 300) -> Path:
+        """导出当前预览图。"""
+        output = Path(path)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        self.plot_widget(kind).fig.savefig(output, dpi=dpi, bbox_inches="tight")
+        return output
+
+    def current_spectrum_snapshot(self) -> dict[str, object]:
+        """返回当前谱图所用的数据快照。"""
+        mean_spectra: dict[float, dict[str, np.ndarray]] = {}
+        for zeta, values in self._last_mean_spectra.items():
+            mean_spectra[float(zeta)] = {
+                key: np.asarray(array, dtype=np.float64).copy()
+                for key, array in values.items()
+            }
+        return {
+            "periods": self._last_spectrum_periods.copy(),
+            "target_sa": self._last_target_sa.copy(),
+            "zetas": list(self._last_zetas),
+            "mean_spectra": mean_spectra,
+            "triple_log": bool(
+                self._triple_log_check.isChecked()
+                if self._triple_log_check is not None
+                else False
+            ),
+            "damping_mode": (
+                self._damping_combo.currentData()
+                if self._damping_combo is not None
+                else "single"
+            ),
+        }
+
     def refresh_from_services(self) -> None:
         """响应选中信号/目标谱变化并刷新全部预览。"""
         records = self._pool.selection()
@@ -188,6 +255,12 @@ class PreviewPanel(QWidget):
         records = self._pool.selection()
         target_sa = self._target_service.sa()
         if not records and target_sa.size == 0:
+            self._remember_spectrum_snapshot(
+                np.array([], dtype=np.float64),
+                np.array([], dtype=np.float64),
+                [],
+                {},
+            )
             self._show_spectrum_placeholder("反应谱：请选择信号")
             return
 
@@ -195,6 +268,7 @@ class PreviewPanel(QWidget):
         base_zeta = float(self._target_service.zeta())
         zetas = self._selected_zetas(base_zeta)
         spectra_by_zeta = self._mean_spectra(records, periods, zetas)
+        self._remember_spectrum_snapshot(periods, target_sa, zetas, spectra_by_zeta)
         axes = self._reset_spectrum_axes(periods)
         colors = get_mpl_colors(self._dark)
         palette = colors["palette"]
@@ -341,6 +415,24 @@ class PreviewPanel(QWidget):
         self._spectrum_plot.canvas.ax = axis
         self._spectrum_axes = [axis]
         self._spectrum_plot.show_placeholder(text)
+
+    def _remember_spectrum_snapshot(
+        self,
+        periods: np.ndarray,
+        target_sa: np.ndarray,
+        zetas: Sequence[float],
+        spectra_by_zeta: dict[float, dict[str, np.ndarray]],
+    ) -> None:
+        self._last_spectrum_periods = np.asarray(periods, dtype=np.float64).copy()
+        self._last_target_sa = np.asarray(target_sa, dtype=np.float64).copy()
+        self._last_zetas = [float(zeta) for zeta in zetas]
+        self._last_mean_spectra = {
+            float(zeta): {
+                key: np.asarray(array, dtype=np.float64).copy()
+                for key, array in values.items()
+            }
+            for zeta, values in spectra_by_zeta.items()
+        }
 
     def _format_zeta(self, zeta: float) -> str:
         return f"{zeta * 100:.0f}%"
