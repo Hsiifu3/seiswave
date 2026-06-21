@@ -88,6 +88,8 @@ class PreviewPanel(QWidget):
         self._acc_plot = PlotWidget(show_toolbar=False, dark=self._dark)
         self._vel_plot = PlotWidget(show_toolbar=False, dark=self._dark)
         self._disp_plot = PlotWidget(show_toolbar=False, dark=self._dark)
+        for _p in (self._acc_plot, self._vel_plot, self._disp_plot):
+            _p.setMinimumHeight(120)  # 防止三联时程被压扁，留呼吸空间
         motion_splitter.addWidget(self._acc_plot)
         motion_splitter.addWidget(self._vel_plot)
         motion_splitter.addWidget(self._disp_plot)
@@ -97,6 +99,7 @@ class PreviewPanel(QWidget):
         lower_splitter = QSplitter(Qt.Vertical)
         lower_splitter.setChildrenCollapsible(False)
         self._spectrum_plot = PlotWidget(show_toolbar=False, dark=self._dark)
+        self._spectrum_plot.setMinimumHeight(170)  # 反应谱需要足够高度避免压扁
         self._scorecard = Scorecard()
         self._scorecard.metrics_changed.connect(self.metrics_changed.emit)
         lower_splitter.addWidget(self._spectrum_plot)

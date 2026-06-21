@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QFrame,
     QGroupBox,
     QLabel,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -64,23 +66,31 @@ class ToolDock(QWidget):
     def _setup_ui(self) -> None:
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(6)
+
+        # 工具参数 + 快捷动作放进滚动区，字段再多也只滚动、绝不重叠
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        container = QWidget()
+        cv = QVBoxLayout(container)
+        cv.setContentsMargins(0, 0, 0, 0)
+        cv.setSpacing(10)
 
         group = QGroupBox("工具参数")
-        root.addWidget(group)
-
         layout = QVBoxLayout(group)
+        layout.setSpacing(8)
         self._title_label = QLabel()
         layout.addWidget(self._title_label)
 
         self._stack = QStackedWidget()
-        layout.addWidget(self._stack, 1)
-
-        self._run_button = QPushButton("▶ 运行")
-        self._run_button.clicked.connect(self._run_current_tool)
-        layout.addWidget(self._run_button)
+        layout.addWidget(self._stack)  # 自然高度，不压缩
+        cv.addWidget(group)
 
         quick_group = QGroupBox("快捷动作")
         quick_layout = QVBoxLayout(quick_group)
+        quick_layout.setSpacing(10)
         self._plot_export_tool = PlotExportTool(
             self._preview_panel,
             self.message_requested.emit,
@@ -93,8 +103,17 @@ class ToolDock(QWidget):
             self.message_requested.emit,
         )
         quick_layout.addWidget(self._data_export_tool)
-        root.addWidget(quick_group)
-        root.addStretch(1)
+        cv.addWidget(quick_group)
+        cv.addStretch(1)
+
+        scroll.setWidget(container)
+        root.addWidget(scroll, 1)
+
+        # 运行按钮固定在底部，始终可见、不随表单滚走
+        self._run_button = QPushButton("▶ 运行")
+        self._run_button.setMinimumHeight(36)
+        self._run_button.clicked.connect(self._run_current_tool)
+        root.addWidget(self._run_button)
 
     def _register_tools(self) -> None:
         self._add_tool(
