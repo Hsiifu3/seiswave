@@ -1,6 +1,6 @@
 name: Build Release Installers
 
-# 在打 v* 标签时自动构建,或手动触发(workflow_dispatch)为指定已存在的 Release 补包
+# 打 v* 标签时自动构建,或手动 workflow_dispatch 为指定 Release 补包
 on:
   push:
     tags:
@@ -23,6 +23,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: 计算版本号
+        id: ver
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
       - name: 安装依赖
         run: |
           python -m pip install --upgrade pip
@@ -30,13 +36,17 @@ jobs:
           pip install pyinstaller
       - name: PyInstaller 打包 (.app)
         run: python -m PyInstaller build.spec --noconfirm --clean
-      - name: 压缩 .app
-        run: ditto -c -k --sequesterRsrc --keepParent "dist/SeisWave.app" "SeisWave-${{ github.event.inputs.tag || github.ref_name }}-macos.zip"
+      - name: 生成 .dmg 磁盘镜像
+        run: |
+          hdiutil create -volname "SeisWave" \
+            -srcfolder "dist/SeisWave.app" \
+            -ov -format UDZO \
+            "SeisWave-${{ steps.ver.outputs.tag }}-macos.dmg"
       - name: 上传到 Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          files: SeisWave-*-macos.zip
+          tag_name: ${{ steps.ver.outputs.tag }}
+          files: SeisWave-*-macos.dmg
 
   build-windows:
     runs-on: windows-latest
@@ -45,17 +55,27 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: 计算版本号
+        id: ver
+        shell: bash
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
       - name: 安装依赖
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
-      - name: PyInstaller 打包 (.exe)
+      - name: PyInstaller 打包 (onedir)
         run: python -m PyInstaller build.spec --noconfirm --clean
-      - name: 压缩发布目录
-        run: Compress-Archive -Path "dist/SeisWave/*" -DestinationPath "SeisWave-${{ github.event.inputs.tag || github.ref_name }}-windows.zip"
+      - name: 安装 Inno Setup
+        run: choco install innosetup --no-progress -y
+      - name: 编译安装器 Setup.exe
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=${{ steps.ver.outputs.version }} packaging\installer.iss
       - name: 上传到 Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          files: SeisWave-*-windows.zip
+          tag_name: ${{ steps.ver.outputs.tag }}
+          files: installer_out/SeisWave-*-windows-setup.exe
