@@ -76,6 +76,7 @@ class TestPulseCalculator:
         assert params.t0 == 15.0  # t_total / 2
 
     def test_compute_params_reverse_fault(self):
+        """B-RM(2009) PGV 不含断层类型项，A 与断层类型无关。"""
         from seiswave.core.pulse import PulseCalculator
         ss = PulseCalculator.compute_params(
             Mw=7.0, R=5.0, fault_type="strike_slip"
@@ -83,10 +84,7 @@ class TestPulseCalculator:
         rev = PulseCalculator.compute_params(
             Mw=7.0, R=5.0, fault_type="reverse"
         )
-        # Reverse fault has higher amplitude (+0.20 in ln(A))
-        assert rev.A > ss.A
-        # Ratio is exp(0.20) ≈ 1.22
-        assert rev.A == pytest.approx(ss.A * np.exp(0.20), rel=1e-6)
+        assert rev.A == pytest.approx(ss.A, rel=1e-9)
 
     def test_compute_params_user_overrides(self):
         """用户可直接覆盖 Tp, A, phi, t0"""
@@ -128,12 +126,17 @@ class TestPulseCalculator:
         assert near.A > mid.A > far.A
 
     def test_A_empirical_formula_fault_type(self):
-        """逆断层 A 应大于走滑，正断层应小于走滑"""
+        """脉冲幅值 A 按 B-RM-Gillie(2009) Eq.(1):土 > 岩,且数值符合原式。"""
         from seiswave.core.pulse import PulseCalculator
-        ss = PulseCalculator.compute_params(Mw=7.0, R=5.0, fault_type="strike_slip")
-        rev = PulseCalculator.compute_params(Mw=7.0, R=5.0, fault_type="reverse")
-        norm = PulseCalculator.compute_params(Mw=7.0, R=5.0, fault_type="normal")
-        assert rev.A > ss.A > norm.A
+        rock = PulseCalculator.compute_params(Mw=7.0, R=5.0, Vs30=800.0)
+        soil = PulseCalculator.compute_params(Mw=7.0, R=5.0, Vs30=400.0)
+        # 土场地 PGV 大于岩石(a=2.11 vs 1.86)
+        assert soil.A > rock.A
+        # 与原式逐位一致:ln(PGV)=a+0.55Mw-0.39ln(R²+25)
+        exp_rock = np.exp(1.86 + 0.55 * 7.0 - 0.39 * np.log(5.0 ** 2 + 25.0))
+        exp_soil = np.exp(2.11 + 0.55 * 7.0 - 0.39 * np.log(5.0 ** 2 + 25.0))
+        assert rock.A == pytest.approx(exp_rock, rel=1e-9)
+        assert soil.A == pytest.approx(exp_soil, rel=1e-9)
 
     def test_t0_default_centered(self):
         """t0 默认应居中"""

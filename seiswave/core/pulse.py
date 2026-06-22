@@ -103,6 +103,7 @@ class PulseCalculator:
         Mw: float,
         R: float,
         fault_type: Literal["strike_slip", "normal", "reverse"] = "strike_slip",
+        Vs30: float = 760.0,
         phi: Optional[float] = None,
         t_total: float = 30.0,
         gamma: float = 1.8,
@@ -153,20 +154,17 @@ class PulseCalculator:
         if A_override is not None:
             A = A_override
         else:
-            # ⚠️ 占位估算，待替换为已发表的近断层 PGV 衰减关系
-            # (Bray & Rodriguez-Marek 2004, Soil Dyn. EE 24:815-828, Table 3;
-            #  或 Bray-Rodriguez-Marek-Gillie 2009, NZSEE Bull. 42(1))。
-            # 当前为简化经验式，非标准关系，量级合理仅供脉冲幅值初值；
-            # 最终幅值仍由残余分解对目标谱的安全缩放约束。
-            # 量级:Mw7.0 R5km SS→A≈59cm/s; Mw7.5 R3km Rev→A≈152; Mw6.5 R10km SS→A≈22
-            fault_corr = {
-                "strike_slip": 0.0,
-                "normal": -0.15,
-                "reverse": 0.20,
-            }.get(fault_type, 0.0)
-            ln_A = -0.8 + 0.88 * Mw - 0.8 * np.log(max(R, 0.1)) + fault_corr
+            # 近断层前方向性脉冲 PGV（即脉冲幅值 A），按已发表关系:
+            # Bray, Rodriguez-Marek & Gillie (2009), "Design ground motions near
+            # active faults", Bull. NZSEE 42(1):1-8, Eq.(1) + Table 1（中位值，
+            # 略去 η/ε 误差项）:
+            #   ln(PGV) = a + b·Mw + c·ln(R² + d²),  PGV[cm/s], R[km]
+            #   岩石(Vs30≥760): a=1.86; 土: a=2.11; b=0.55, c=-0.39, d=5.00
+            # 该关系不含断层类型项（FD 对走滑/倾滑均发生），故不做断层修正。
+            a_coef = 1.86 if Vs30 >= 760.0 else 2.11
+            b_coef, c_coef, d_coef = 0.55, -0.39, 5.00
+            ln_A = a_coef + b_coef * Mw + c_coef * np.log(R ** 2 + d_coef ** 2)
             A = float(np.exp(ln_A))
-            A = max(A, 10.0)  # 最小幅值 10 cm/s
 
         phi_eff = phi_override if phi_override is not None else (phi if phi is not None else 0.0)
         t0 = t0_override if t0_override is not None else (t_total / 2.0)
@@ -384,6 +382,7 @@ def create_pulse(
     dt: float,
     n: int,
     fault_type: Literal["strike_slip", "normal", "reverse"] = "strike_slip",
+    Vs30: float = 760.0,
     phi: Optional[float] = None,
     t_total: Optional[float] = None,
     Tp_override: Optional[float] = None,
@@ -419,7 +418,7 @@ def create_pulse(
     if t_total is None:
         t_total = n * dt
     params = PulseCalculator.compute_params(
-        Mw=Mw, R=R, fault_type=fault_type, phi=phi, t_total=t_total,
+        Mw=Mw, R=R, fault_type=fault_type, Vs30=Vs30, phi=phi, t_total=t_total,
         Tp_override=Tp_override, A_override=A_override,
         phi_override=phi_override, t0_override=t0_override,
     )

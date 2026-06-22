@@ -1768,6 +1768,7 @@ class NearFieldPulseGenerator:
         t_total_eff = t_total if t_total is not None else n * dt
         pulse_params = PulseCalculator.compute_params(
             Mw=Mw, R=R, fault_type=fault_type,
+            Vs30=Vs30,
             phi=phi, t_total=t_total_eff,
             gamma=gamma,
             Tp_override=Tp_override, A_override=A_override,
