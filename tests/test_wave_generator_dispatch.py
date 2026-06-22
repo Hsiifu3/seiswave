@@ -26,7 +26,7 @@ class TestWaveGeneratorDispatch:
         [
             ("FF", {"Mw": 7.0, "R": 50.0, "Vs30": 760.0, "dt": TEST_DT}, "FF"),
             ("NF", {"Mw": 7.0, "R": 5.0, "Vs30": 760.0, "dt": TEST_DT}, "NF"),
-            ("NFP", {"Mw": 7.5, "R": 5.0, "Vs30": 760.0, "dt": 0.01}, "NFP"),
+            ("NFP", {"Mw": 7.0, "R": 5.0, "Vs30": 760.0, "dt": 0.01}, "NFP"),
         ],
     )
     def test_dispatch_special_generators_do_not_call_baseline_correction(
@@ -99,7 +99,7 @@ class TestWaveGeneratorDispatch:
 
         sig = WaveGenerator.generate(
             type="NFP",
-            Mw=7.5, R=5.0, Vs30=760.0,
+            Mw=7.0, R=5.0, Vs30=760.0,
             n=TEST_N, dt=0.01,
             max_iter=TEST_MAX_ITER, tol=TEST_TOL,
         )
@@ -184,7 +184,7 @@ class TestWaveGeneratorDispatch:
 
         sig_nfp = WaveGenerator.generate(
             type="Nfp",
-            Mw=7.5, R=5.0, Vs30=760.0,
+            Mw=7.0, R=5.0, Vs30=760.0,
             n=TEST_N, dt=0.01,
             max_iter=TEST_MAX_ITER, tol=TEST_TOL,
         )
@@ -219,7 +219,7 @@ class TestWaveGeneratorDispatch:
         from seiswave.core.generator import create_ground_motion
 
         sig = create_ground_motion(
-            type="NFP", Mw=7.5, R=5.0,
+            type="NFP", Mw=7.0, R=5.0,
             n=TEST_N, dt=0.01,
             max_iter=TEST_MAX_ITER, tol=TEST_TOL,
         )

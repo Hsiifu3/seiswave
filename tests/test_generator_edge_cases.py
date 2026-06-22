@@ -265,7 +265,7 @@ def test_nfp_invalid_fault_type(monkeypatch):
 
     monkeypatch.setattr(
         "seiswave.core.pulse.PulseCalculator.compute_params",
-        lambda **kw: SimpleNamespace(Tp=1.0, A=1.0, phi=0.0, t0=1.0)
+        lambda **kw: SimpleNamespace(Tp=1.0, A=1.0, phi=0.0, t0=1.0, gamma=1.0)
     )
     monkeypatch.setattr(
         "seiswave.core.pulse.PulseWavelet.generate",
@@ -307,7 +307,7 @@ def test_nfp_best_sig_none_fallback(monkeypatch):
 
     monkeypatch.setattr(
         "seiswave.core.pulse.PulseCalculator.compute_params",
-        lambda **kw: SimpleNamespace(Tp=1.0, A=1.0, phi=0.0, t0=1.0)
+        lambda **kw: SimpleNamespace(Tp=1.0, A=1.0, phi=0.0, t0=1.0, gamma=1.0)
     )
     monkeypatch.setattr(
         "seiswave.core.pulse.PulseWavelet.generate",

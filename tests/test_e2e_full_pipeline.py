@@ -214,7 +214,7 @@ class TestUnifiedInterfaceE2E:
         """统一接口生成 NFP"""
         sig = create_ground_motion(
             "NFP", Mw=7.0, R=4.0, Vs30=760.0,
-            n=512, dt=0.01
+            n=1024, dt=0.01
         )
         assert sig is not None
 

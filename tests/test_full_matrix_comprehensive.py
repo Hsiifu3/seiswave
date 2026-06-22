@@ -152,13 +152,17 @@ class TestNearFieldPulseFullMatrix:
     @pytest.mark.parametrize("Vs30", VS30_VALUES)
     def test_nfp_all_combinations(self, Mw, R, Vs30):
         """NFP 所有 Mw × R × Vs30 组合"""
+        from seiswave.core.pulse import PulseCalculator
+        dt = 0.01
+        # 信号须容纳 γ·Tp(γ=1.8),按 Mw 自适应取点数(大震脉冲更长)
+        n = max(1024, int(np.ceil(1.8 * PulseCalculator.compute_period(Mw) / dt)) + 256)
         sig = NearFieldPulseGenerator.generate(
             Mw=Mw, R=R, Vs30=Vs30,
-            n=1024, dt=0.01, zeta=0.05,
+            n=n, dt=dt, zeta=0.05,
             max_iter=15, tol=0.10,
         )
         assert sig is not None, f"NFP 生成失败: Mw={Mw}, R={R}, Vs30={Vs30}"
-        assert len(sig.acc) == 1024
+        assert len(sig.acc) == n
 
     # 脉冲参数覆盖
     Tp_OVERRIDES = [None, 0.8, 1.0, 1.5, 2.0]
@@ -168,9 +172,13 @@ class TestNearFieldPulseFullMatrix:
     @pytest.mark.parametrize("A", A_OVERRIDES)
     def test_nfp_pulse_override(self, Tp, A):
         """NFP 脉冲参数覆盖"""
+        from seiswave.core.pulse import PulseCalculator
+        dt = 0.01
+        eff_Tp = Tp if Tp is not None else PulseCalculator.compute_period(7.0)
+        n = max(512, int(np.ceil(1.8 * eff_Tp / dt)) + 256)
         kwargs = {
             "Mw": 7.0, "R": 4.0, "Vs30": 760.0,
-            "n": 512, "dt": 0.01, "zeta": 0.05,
+            "n": n, "dt": dt, "zeta": 0.05,
             "max_iter": 10, "tol": 0.10,
         }
         if Tp is not None:
@@ -192,7 +200,7 @@ class TestCrossTypeConsistency:
 
         sig_ff = FarFieldGenerator.generate(Mw=Mw, R=R * 10, Vs30=Vs30, n=512, dt=0.02)
         sig_nf = NearFieldNoPulseGenerator.generate(Mw=Mw, R=R, Vs30=Vs30, n=512, dt=0.02)
-        sig_nfp = NearFieldPulseGenerator.generate(Mw=Mw, R=R, Vs30=Vs30, n=512, dt=0.01)
+        sig_nfp = NearFieldPulseGenerator.generate(Mw=Mw, R=R, Vs30=Vs30, n=1024, dt=0.01)
 
         assert sig_ff is not None
         assert sig_nf is not None
@@ -203,7 +211,7 @@ class TestCrossTypeConsistency:
         for cls, kwargs in [
             (FarFieldGenerator, {"Mw": 7.0, "R": 50.0, "Vs30": 760.0, "n": 512, "dt": 0.02}),
             (NearFieldNoPulseGenerator, {"Mw": 7.0, "R": 5.0, "Vs30": 760.0, "n": 512, "dt": 0.02}),
-            (NearFieldPulseGenerator, {"Mw": 7.0, "R": 4.0, "Vs30": 760.0, "n": 512, "dt": 0.01}),
+            (NearFieldPulseGenerator, {"Mw": 7.0, "R": 4.0, "Vs30": 760.0, "n": 1024, "dt": 0.01}),
         ]:
             sig = cls.generate(**kwargs)
             pga = float(np.max(np.abs(sig.acc)))
