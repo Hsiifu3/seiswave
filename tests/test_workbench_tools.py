@@ -287,7 +287,8 @@ class TestWorkbenchTools:
         window, pool, target = _build_window()
         try:
             tool = window._tool_dock._tool_widgets["人工波生成"]
-            tool._n_spin.setValue(128)
+            # n=512 (dt=0.02 → 10.2s)：NFP 需容纳 γ·Tp≈7.2s 的脉冲(Mw7, γ=1.8)
+            tool._n_spin.setValue(512)
             tool._iter_spin.setValue(4)
             tool._trials_spin.setValue(1)
 

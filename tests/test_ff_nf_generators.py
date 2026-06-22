@@ -324,9 +324,11 @@ class TestGeneratorStabilityMatrix:
             (
                 "NearFieldPulseGenerator",
                 MotionType.NEAR_FIELD_PULSE,
-                {"Mw": 7.5, "R": 5.0, "dt": 0.01, "n": 1024, "max_iter": 15, "tol": 0.10},
-                0.06,
-                0.19,
+                {"Mw": 7.5, "R": 5.0, "dt": 0.01, "n": 2048, "max_iter": 15, "tol": 0.10},
+                # γ=1.8(MP 文献均值)的脉冲比旧 γ=1 更振荡，残余 SRSS 分解固有误差
+                # 略升：均值 ~6.2%、最差周期点 ~23%（迭代加到 25 仍同值，属方法下限）。
+                0.065,
+                0.24,
                 True,
                 980.0,
             ),
@@ -340,7 +342,7 @@ class TestGeneratorStabilityMatrix:
             "nf-m7.5-r3-dt0.01-n2048",
             "nfp-m7.0-r4-dt0.01-n1024",
             "nfp-m7.2-r4-dt0.01-n1024",
-            "nfp-m7.5-r5-dt0.01-n1024",
+            "nfp-m7.5-r5-dt0.01-n2048",
         ],
     )
     def test_multi_condition_stability(

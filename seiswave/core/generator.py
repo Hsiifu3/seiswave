@@ -1771,6 +1771,15 @@ class NearFieldPulseGenerator:
             Tp_override=Tp_override, A_override=A_override,
             phi_override=phi_override, t0_override=t0_override,
         )
+        # 脉冲有效持时 = γ·Tp，必须完整容纳于信号内，否则脉冲被截断、结果失真
+        required_dur = pulse_params.gamma * pulse_params.Tp
+        if n * dt < required_dur:
+            min_n = int(np.ceil(required_dur / dt)) + 1
+            raise ValueError(
+                f"信号时长 {n * dt:.1f}s 不足以容纳脉冲(γ·Tp={required_dur:.1f}s, "
+                f"Tp={pulse_params.Tp:.2f}s, γ={pulse_params.gamma:.1f})；"
+                f"请将点数 n 增至 ≥ {min_n}（Mw 越大脉冲越长）"
+            )
         pulse_vel_cm, pulse_acc_cm = PulseWavelet.generate(pulse_params, dt, n)
         # cm/s² → g
         pulse_acc_g = pulse_acc_cm / 980.0

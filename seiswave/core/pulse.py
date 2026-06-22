@@ -39,6 +39,10 @@ class PulseParams:
     t0: float
     """脉冲中心时间 (s)，必须 ≥ 0"""
 
+    gamma: float = 1.8
+    """MP 振荡参数 γ：脉冲半周期数，γ>1。默认 1.8 = MP(2003) 165 条记录标定均值
+    (Mavroeidis-Papageorgiou 2003;γ~N(1.8, 0.4), 左截断于 1)。"""
+
     def __post_init__(self):
         if self.Tp <= 0:
             raise ValueError(f"Tp must be positive, got {self.Tp}")
@@ -46,6 +50,8 @@ class PulseParams:
             raise ValueError(f"A must be positive, got {self.A}")
         if self.t0 < 0:
             raise ValueError(f"t0 must be non-negative, got {self.t0}")
+        if self.gamma < 1.0:
+            raise ValueError(f"gamma must be >= 1.0, got {self.gamma}")
 
     def with_overrides(self, **kwargs) -> "PulseParams":
         """返回参数被覆盖后的新实例（原实例不变）。"""
@@ -66,7 +72,9 @@ class PulseCalculator:
         """
         计算脉冲周期 Tp。
 
-        经验公式: ln(Tp) = -6.68 + 1.15 * Mw
+        Mavroeidis & Papageorgiou (2003) 原式（以 10 为底）：
+            log10(Tp) = -2.9 + 0.5 * Mw
+        直接采用原式，不做自然对数系数圆整。
 
         Parameters
         ----------
@@ -87,7 +95,7 @@ class PulseCalculator:
             raise ValueError(
                 f"脉冲模型不适用于 Mw < 5.5 (got {Mw})，请使用 NF 模式"
             )
-        return float(np.exp(-6.68 + 1.15 * Mw))
+        return float(10.0 ** (-2.9 + 0.5 * Mw))
 
     @classmethod
     def compute_params(
@@ -97,10 +105,12 @@ class PulseCalculator:
         fault_type: Literal["strike_slip", "normal", "reverse"] = "strike_slip",
         phi: Optional[float] = None,
         t_total: float = 30.0,
+        gamma: float = 1.8,
         Tp_override: Optional[float] = None,
         A_override: Optional[float] = None,
         phi_override: Optional[float] = None,
         t0_override: Optional[float] = None,
+        gamma_override: Optional[float] = None,
     ) -> PulseParams:
         """
         计算脉冲参数 (Tp, A, φ, t₀)。
@@ -159,8 +169,9 @@ class PulseCalculator:
 
         phi_eff = phi_override if phi_override is not None else (phi if phi is not None else 0.0)
         t0 = t0_override if t0_override is not None else (t_total / 2.0)
+        gamma_eff = gamma_override if gamma_override is not None else gamma
 
-        return PulseParams(Tp=Tp, A=A, phi=phi_eff, t0=t0)
+        return PulseParams(Tp=Tp, A=A, phi=phi_eff, t0=t0, gamma=gamma_eff)
 
 
 # ──────────────────── MP 脉冲小波生成器 ────────────────────
@@ -208,18 +219,19 @@ class PulseWavelet:
 
         t = np.arange(n, dtype=np.float64) * dt
         v = cls.velocity(t, params)
-        a = cls.acceleration(t, v, dt)
+        a = cls.acceleration(t, v, dt, params)
         return v, a
 
     @staticmethod
     def velocity(t: np.ndarray, params: PulseParams) -> np.ndarray:
         """
-        脉冲速度时程。
+        脉冲速度时程（Mavroeidis & Papageorgiou 2003 完整式）。
 
         公式：
-            v(t) = (A/2) * [1 + cos(2π(t-t₀)/Tp)] * cos(2π(t-t₀)/Tp + φ)
+            v(t) = (A/2)·[1 + cos(2π(t-t₀)/(γ·Tp))]·cos(2π(t-t₀)/Tp + φ)
 
-        有效区间: t₀ - Tp/2 ≤ t ≤ t₀ + Tp/2，区间外为 0。
+        有效区间: t₀ - γ·Tp/2 ≤ t ≤ t₀ + γ·Tp/2，区间外为 0。
+        γ 为 MP 振荡参数（包络跨 γ 个载波周期）；γ=1 退化为单周期脉冲。
 
         Parameters
         ----------
@@ -237,46 +249,71 @@ class PulseWavelet:
         v = np.zeros_like(t)
 
         Tp, A, phi, t0 = params.Tp, params.A, params.phi, params.t0
-        mask = (t >= t0 - Tp / 2) & (t <= t0 + Tp / 2)
+        gamma = params.gamma
+        half = gamma * Tp / 2.0
+        mask = (t >= t0 - half) & (t <= t0 + half)
         if not np.any(mask):
             return v
 
         tau = t[mask] - t0
-        v[mask] = (A / 2.0) * (1.0 + np.cos(2.0 * np.pi * tau / Tp)) * np.cos(
-            2.0 * np.pi * tau / Tp + phi
-        )
+        env = 1.0 + np.cos(2.0 * np.pi * tau / (gamma * Tp))
+        carrier = np.cos(2.0 * np.pi * tau / Tp + phi)
+        v[mask] = (A / 2.0) * env * carrier
         return v
 
     @staticmethod
     def acceleration(
-        t: np.ndarray, v: np.ndarray, dt: float
+        t: np.ndarray, v: np.ndarray, dt: float, params: "PulseParams | None" = None
     ) -> np.ndarray:
         """
-        通过速度数值微分获得加速度时程。
+        脉冲加速度时程。
 
-        使用 numpy.gradient 实现中心差分，边界处使用前向/后向差分。
+        若提供 params，使用 MP (2003) 速度式的解析导数（精确）：
+            a(t) = -(A/2)·[ ω_e·sin(ω_e·τ)·cos(ω_c·τ+φ)
+                            + ω_c·(1+cos(ω_e·τ))·sin(ω_c·τ+φ) ]
+            其中 ω_c = 2π/Tp, ω_e = 2π/(γ·Tp)
+        否则回退到对速度的数值微分 (np.gradient)。
 
         Parameters
         ----------
         t : np.ndarray
-            时间数组 (s)，用于长度一致性验证
+            时间数组 (s)
         v : np.ndarray
-            速度时程 (cm/s)
+            速度时程 (cm/s)，仅在数值微分回退时使用
         dt : float
             时间步长 (s)
+        params : PulseParams, optional
+            脉冲参数；提供则用解析式
 
         Returns
         -------
         np.ndarray
             加速度时程 (cm/s²)
         """
-        v = np.asarray(v, dtype=np.float64)
         t_arr = np.asarray(t, dtype=np.float64)
-        if len(v) != len(t_arr):
+
+        if params is not None:
+            Tp, A, phi, t0 = params.Tp, params.A, params.phi, params.t0
+            gamma = params.gamma
+            half = gamma * Tp / 2.0
+            a = np.zeros_like(t_arr)
+            mask = (t_arr >= t0 - half) & (t_arr <= t0 + half)
+            if np.any(mask):
+                tau = t_arr[mask] - t0
+                wc = 2.0 * np.pi / Tp
+                we = 2.0 * np.pi / (gamma * Tp)
+                a[mask] = -(A / 2.0) * (
+                    we * np.sin(we * tau) * np.cos(wc * tau + phi)
+                    + wc * (1.0 + np.cos(we * tau)) * np.sin(wc * tau + phi)
+                )
+            return a
+
+        v_arr = np.asarray(v, dtype=np.float64)
+        if len(v_arr) != len(t_arr):
             raise ValueError(
-                f"v 和 t 长度不一致: {len(v)} vs {len(t_arr)}"
+                f"v 和 t 长度不一致: {len(v_arr)} vs {len(t_arr)}"
             )
-        return np.gradient(v, dt)
+        return np.gradient(v_arr, dt)
 
     @classmethod
     def generate_symmetric(
@@ -321,11 +358,11 @@ class PulseWavelet:
     @staticmethod
     def effective_duration(params: PulseParams) -> float:
         """
-        返回脉冲有效持时 = Tp (s)。
+        返回脉冲有效持时 = γ·Tp (s)。
 
-        有效区间为 [t0 - Tp/2, t0 + Tp/2]，长度为 Tp。
+        有效区间为 [t0 - γ·Tp/2, t0 + γ·Tp/2]，长度为 γ·Tp。
         """
-        return params.Tp
+        return params.gamma * params.Tp
 
     @classmethod
     def peak_velocity(cls, v: np.ndarray) -> float:

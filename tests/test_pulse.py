@@ -56,7 +56,7 @@ class TestPulseCalculator:
         from seiswave.core.pulse import PulseCalculator
         Mw = 7.0
         Tp = PulseCalculator.compute_period(Mw)
-        expected = np.exp(-6.68 + 1.15 * Mw)
+        expected = 10.0 ** (-2.9 + 0.5 * Mw)
         assert Tp == pytest.approx(expected, rel=1e-6)
         assert Tp > 0
 
@@ -70,7 +70,7 @@ class TestPulseCalculator:
         params = PulseCalculator.compute_params(
             Mw=7.0, R=5.0, fault_type="strike_slip", phi=0.0, t_total=30.0
         )
-        assert params.Tp == pytest.approx(np.exp(-6.68 + 1.15 * 7.0), rel=1e-6)
+        assert params.Tp == pytest.approx(10.0 ** (-2.9 + 0.5 * 7.0), rel=1e-6)
         assert params.A > 0
         assert params.phi == 0.0
         assert params.t0 == 15.0  # t_total / 2
@@ -193,14 +193,15 @@ class TestPulseWaveletGenerate:
         n = 1500
         v, a = PulseWavelet.generate(params, dt, n)
         t = np.arange(n) * dt
-        # 区间外
-        left_mask = t < (t0 - Tp / 2 - 1e-9)
-        right_mask = t > (t0 + Tp / 2 + 1e-9)
+        # 区间外（窗口为 ±γ·Tp/2）
+        half = params.gamma * Tp / 2
+        left_mask = t < (t0 - half - 1e-9)
+        right_mask = t > (t0 + half + 1e-9)
         assert np.all(v[left_mask] == 0.0)
         assert np.all(v[right_mask] == 0.0)
 
     def test_velocity_at_boundaries(self):
-        """边界处速度应为 0（envelope [1+cos] = 0 当 tau = ±Tp/2）"""
+        """边界处速度应为 0（envelope [1+cos] = 0 当 tau = ±γ·Tp/2）"""
         from seiswave.core.pulse import PulseWavelet, PulseParams
         Tp = 5.0
         t0 = 9.0
@@ -209,9 +210,10 @@ class TestPulseWaveletGenerate:
         n = 1500
         v, _ = PulseWavelet.generate(params, dt, n)
         t = np.arange(n) * dt
-        # 找最接近边界的点
-        left_idx = np.argmin(np.abs(t - (t0 - Tp / 2)))
-        right_idx = np.argmin(np.abs(t - (t0 + Tp / 2)))
+        # 找最接近边界的点（窗口 ±γ·Tp/2）
+        half = params.gamma * Tp / 2
+        left_idx = np.argmin(np.abs(t - (t0 - half)))
+        right_idx = np.argmin(np.abs(t - (t0 + half)))
         # 边界处应为 0 或接近 0
         assert np.abs(v[left_idx]) < 1.0  # cm/s, 边界 envelope 为 0
         assert np.abs(v[right_idx]) < 1.0
@@ -263,7 +265,8 @@ class TestPulseWaveletGenerate:
     def test_one_sided_shape(self):
         """φ=π/2 时速度时程应为反对称（位移单向，工程上称"单向脉冲"）"""
         from seiswave.core.pulse import PulseWavelet, PulseParams
-        params = PulseParams(Tp=5.0, A=150.0, phi=np.pi/2, t0=10.0)
+        # 显式 γ=1（单周期）：0.6495A 是单周期单向脉冲的精确理论峰值
+        params = PulseParams(Tp=5.0, A=150.0, phi=np.pi/2, t0=10.0, gamma=1.0)
         dt = 0.02
         n = 1500
         v, _ = PulseWavelet.generate(params, dt, n)
@@ -318,7 +321,8 @@ class TestPulseWaveletConvenience:
     def test_effective_duration(self):
         from seiswave.core.pulse import PulseWavelet, PulseParams
         params = PulseParams(Tp=5.0, A=150.0, phi=0.0, t0=9.0)
-        assert PulseWavelet.effective_duration(params) == 5.0
+        # 有效持时 = γ·Tp
+        assert PulseWavelet.effective_duration(params) == params.gamma * 5.0
 
     def test_peak_velocity(self):
         from seiswave.core.pulse import PulseWavelet
@@ -350,7 +354,7 @@ class TestCreatePulse:
         v, a, params = create_pulse(Mw=7.0, R=5.0, dt=0.02, n=1500)
         assert len(v) == 1500
         assert len(a) == 1500
-        assert params.Tp == pytest.approx(np.exp(-6.68 + 1.15 * 7.0), rel=1e-6)
+        assert params.Tp == pytest.approx(10.0 ** (-2.9 + 0.5 * 7.0), rel=1e-6)
         assert params.A > 0
         assert params.phi == 0.0
 
@@ -395,12 +399,13 @@ class TestLiteratureShape:
     def test_one_sided_pulse_antisymmetric(self):
         """单向脉冲(φ=π/2)为反对称，峰值约 0.65A"""
         from seiswave.core.pulse import PulseWavelet, PulseParams
-        params = PulseParams(Tp=5.0, A=150.0, phi=np.pi/2, t0=10.0)
+        # 显式 γ=1（单周期）：0.6495A 为该情形精确理论峰值
+        params = PulseParams(Tp=5.0, A=150.0, phi=np.pi/2, t0=10.0, gamma=1.0)
         dt = 0.02
         n = 1500
         v_one, _ = PulseWavelet.generate(params, dt, n)
         v_sym, _ = PulseWavelet.generate(
-            PulseParams(Tp=5.0, A=150.0, phi=0.0, t0=10.0), dt, n
+            PulseParams(Tp=5.0, A=150.0, phi=0.0, t0=10.0, gamma=1.0), dt, n
         )
         t = np.arange(n) * dt
         idx_t0 = np.argmin(np.abs(t - 10.0))
