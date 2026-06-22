@@ -7,10 +7,11 @@
 #endif
 
 [Setup]
-AppId={{B7E2B1C0-5E2A-4C77-9E2D-SEISWAVE0001}
+AppId={{B7E2B1C0-5E2A-4C77-9E2D-A1B2C3D4E5F6}
 AppName=SeisWave
 AppVersion={#AppVersion}
 AppPublisher=SeisWave
+SourceDir=..
 DefaultDirName={autopf}\SeisWave
 DefaultGroupName=SeisWave
 DisableProgramGroupPage=yes
