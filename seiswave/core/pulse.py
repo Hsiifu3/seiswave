@@ -153,11 +153,12 @@ class PulseCalculator:
         if A_override is not None:
             A = A_override
         else:
-            # 基于 Baker (2007) 脉冲记录 PGV 统计与 MP (2003) 的简化经验公式
-            # 量级验证:
-            #   Mw 7.0, R 5km, SS → A ≈ 59 cm/s
-            #   Mw 7.5, R 3km, R  → A ≈ 152 cm/s
-            #   Mw 6.5, R 10km, SS → A ≈ 22 cm/s
+            # ⚠️ 占位估算，待替换为已发表的近断层 PGV 衰减关系
+            # (Bray & Rodriguez-Marek 2004, Soil Dyn. EE 24:815-828, Table 3;
+            #  或 Bray-Rodriguez-Marek-Gillie 2009, NZSEE Bull. 42(1))。
+            # 当前为简化经验式，非标准关系，量级合理仅供脉冲幅值初值；
+            # 最终幅值仍由残余分解对目标谱的安全缩放约束。
+            # 量级:Mw7.0 R5km SS→A≈59cm/s; Mw7.5 R3km Rev→A≈152; Mw6.5 R10km SS→A≈22
             fault_corr = {
                 "strike_slip": 0.0,
                 "normal": -0.15,
