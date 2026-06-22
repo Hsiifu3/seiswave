@@ -23,7 +23,27 @@ SeisWave is a Python toolkit for earthquake engineering centered on code-based g
 
 ---
 
+## 下载安装包(免依赖) / Download Installers
+
+普通用户无需安装 Python 与依赖，直接到 [**Releases**](https://github.com/Hsiifu3/seiswave/releases/latest) 下载对应平台安装包：
+
+| 平台 | 文件 | 安装方式 |
+|---|---|---|
+| **macOS** | `SeisWave-vX.Y-macos.dmg` | 双击打开 `.dmg`，把 **SeisWave** 拖进 **Applications** |
+| **Windows** | `SeisWave-vX.Y-windows-setup.exe` | 双击运行安装向导（装到 Program Files、开始菜单+桌面快捷方式，可在"添加/删除程序"卸载） |
+
+> **首次打开提示**（安装包未做代码签名，属正常现象）：
+> - **macOS**：首次打开若提示"无法打开/来自身份不明的开发者"，请**右键点击 App → 打开**，
+>   在弹窗中再点"打开"即可；或在终端执行 `xattr -dr com.apple.quarantine /Applications/SeisWave.app`。
+> - **Windows**：若出现 SmartScreen 蓝屏提示，点击**"更多信息" → "仍要运行"**。
+
+安装包由 GitHub Actions 在各自平台原生构建（见 `.github/workflows/release.yml`）。
+
+---
+
 ## 安装 / Installation
+
+> 以下为**开发者/源码运行**方式；普通使用请直接下载上方安装包。
 
 ### 仅核心库 / Core library only
 
