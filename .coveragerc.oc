@@ -1,8 +1,0 @@
-[run]
-omit =
-    seiswave/gui_backup_20250215/*
-    seiswave/gui.bak/*
-
-[report]
-skip_empty = True
-show_missing = True

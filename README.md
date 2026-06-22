@@ -2,9 +2,11 @@
 
 **地震信号处理与选波工具包 / Seismic Signal Processing & Wave Selection Toolkit**
 
-SeisWave 是一个用 Python 编写的地震工程工具包，提供地震信号处理、反应谱计算、规范谱生成、地震波选取和人工波生成等功能。v2.0 基于 EQSignal C++ 库完全重写，并附带 PySide6 桌面 GUI 应用。
+SeisWave 是一个用 Python 编写的地震工程工具包，围绕"基于规范自动选波 + 人工波生成"的核心目标，提供地震信号处理、反应谱计算、规范/GMPE 目标谱、天然波选取、人工波与特殊地震动（远场 FF / 近场 NF / 近场脉冲 NFP）生成。v1.0 提供 PySide6 三栏桌面工作台（信号库 / 预览 / 工具），模块间数据互通，时程显示加速度/速度/位移，支持快捷出图与数据导出，并已适配 macOS / Windows 打包。
 
-SeisWave is a Python toolkit for earthquake engineering, providing seismic signal processing, response spectrum computation, code-based design spectrum generation, ground motion selection, and artificial wave generation. v2.0 is a complete rewrite based on the EQSignal C++ library, with a PySide6 desktop GUI.
+SeisWave is a Python toolkit for earthquake engineering centered on code-based ground-motion selection and synthesis. It provides signal processing, response-spectrum computation, code/GMPE target spectra, natural-record selection, and artificial & special ground motions (far-field FF / near-field NF / near-field pulse NFP). v1.0 ships a three-pane PySide6 desktop workbench (signal pool / preview / tools) with shared data flow, a/v/d time histories, quick plotting and export, and macOS / Windows packaging.
+
+> 方法学与文献出处见 [`docs/方法学说明.md`](docs/方法学说明.md)（GB 50011、Mavroeidis-Papageorgiou 2003、Bray-Rodriguez-Marek-Gillie 2009、Al Atik-Abrahamson 2010 等）。
 
 ---
 
@@ -154,16 +156,3 @@ seiswave/
 ## 许可证 / License
 
 MIT License. See [LICENSE](LICENSE) for details.
-
----
-
-## Claude Code Hooks 异步开发（OpenClaw）
-
-本项目集成了 Claude Code Hooks 机制，实现"派发任务 → 后台执行 → 自动回报"的零轮询异步开发流程：
-
-- **`scripts/dispatch-claude.sh`**：异步派发脚本。接收任务描述后在后台启动 `claude -p`（非交互模式），主进程立即返回不阻塞终端。
-- **`.claude/hooks/on-task-complete.sh`**：任务完成钩子。Claude Code 结束时自动触发，将会话 ID、事件类型、时间戳等信息写入结果文件，并唤醒 OpenClaw。
-- **`results/latest.json`**（位于 `.claude/results/latest.json`）：每次 Hook 触发后写入的结构化结果快照，包含 `timestamp`、`session_id`、`event`、`status` 等字段，供下游系统读取。
-- **`openclaw system event wake`**：Hook 末尾调用 OpenClaw CLI 发送系统事件通知，告知 OpenClaw "Claude Code 任务已完成，请读取 latest.json"，从而驱动后续自动化流程。
-
-典型用法：`./scripts/dispatch-claude.sh "修复人工波生成报错"` — 任务在后台运行，完成后 Hook 自动写结果并唤醒 OpenClaw，全程无需手动轮询。

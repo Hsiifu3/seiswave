@@ -12,3 +12,43 @@ dist/
 
 # 可视化 brainstorm 临时文件
 .superpowers/
+
+# 参考资料与开发产物(不纳入仓库)
+matlab_ref/
+.project-wiki/
+.specs/
+benchmarks/
+*.zip
+.coverage
+.coverage.*
+coverage.xml
+.coveragerc.oc
+
+# 根目录开发/调试/原型脚本(正式测试在 tests/)
+/benchmark_*.py
+/debug_*.py
+/verify_*.py
+/e2e_test.py
+/ff_nf_nfp_demo.py
+/test_*.py
+/prototype_*.json
+/report.sh
+/autoresearch-codex.sh
+
+# 开发过程笔记/报告(根目录)
+/REFACTOR_PLAN.md
+/STATUS.md
+/tasks.md
+/design.md
+/requirements.md
+/research_*.md
+/prototype_*.md
+/adjust_peak_*.md
+/audit_*.md
+/*_experiment*.md
+/*_report.md
+/fortran_*.md
+/m_matrix_*.md
+/init_art_wave_*.md
+/CLAUDE_CODE_BRIEF.md
+
