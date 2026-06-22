@@ -1725,6 +1725,7 @@ class NearFieldPulseGenerator:
                  phi=None, t_total=None,
                  Tp_override=None, A_override=None,
                  phi_override=None, t0_override=None,
+                 gamma=1.8, gamma_override=None,
                  spectrum_source="code", code_periods=None, code_sa=None,
                  region="east_strong", axis="major",
                  **kwargs):
@@ -1768,8 +1769,10 @@ class NearFieldPulseGenerator:
         pulse_params = PulseCalculator.compute_params(
             Mw=Mw, R=R, fault_type=fault_type,
             phi=phi, t_total=t_total_eff,
+            gamma=gamma,
             Tp_override=Tp_override, A_override=A_override,
             phi_override=phi_override, t0_override=t0_override,
+            gamma_override=gamma_override,
         )
         # 脉冲有效持时 = γ·Tp，必须完整容纳于信号内，否则脉冲被截断、结果失真
         required_dur = pulse_params.gamma * pulse_params.Tp

@@ -50,6 +50,7 @@ class ArtificialTool(ToolWidget):
         self._r_spin: QDoubleSpinBox | None = None
         self._vs30_spin: QDoubleSpinBox | None = None
         self._fault_combo: QComboBox | None = None
+        self._gamma_spin: QDoubleSpinBox | None = None
         self._gmpe_check: QCheckBox | None = None
         self._region_combo: QComboBox | None = None
         self._axis_combo: QComboBox | None = None
@@ -143,6 +144,17 @@ class ArtificialTool(ToolWidget):
         self._fault_combo.addItem("逆断层 reverse", "reverse")
         form.addRow("断层类型:", self._fault_combo)
 
+        self._gamma_spin = QDoubleSpinBox()
+        self._gamma_spin.setRange(1.0, 3.0)
+        self._gamma_spin.setDecimals(1)
+        self._gamma_spin.setSingleStep(0.1)
+        self._gamma_spin.setValue(1.8)
+        self._gamma_spin.setToolTip(
+            "MP(2003) 脉冲振荡参数 γ：脉冲半周期数。默认 1.8 为文献标定均值，"
+            "范围约 1–3。仅近场脉冲 NFP 有效。"
+        )
+        form.addRow("脉冲 γ (NFP):", self._gamma_spin)
+
         self._gmpe_check = QCheckBox("情景/危险性谱（第五代区划 GMPE，非规范设计谱）")
         self._gmpe_check.toggled.connect(self._refresh_mode_ui)
         form.addRow("特殊谱源:", self._gmpe_check)
@@ -186,6 +198,8 @@ class ArtificialTool(ToolWidget):
         self._gmpe_check.setEnabled(is_special)
         self._region_combo.setEnabled(is_special and self._gmpe_check.isChecked())
         self._axis_combo.setEnabled(is_special and self._gmpe_check.isChecked())
+        if self._gamma_spin is not None:
+            self._gamma_spin.setEnabled(gm_type == "NFP")  # γ 仅 NFP 有效
 
         if is_special and gm_type == "NFP":
             self._fm_combo.setCurrentIndex(self._fm_combo.findData(0))
@@ -242,6 +256,7 @@ class ArtificialTool(ToolWidget):
             "fault_type": str(self._fault_combo.currentData()),
             "region": str(self._region_combo.currentData()),
             "axis": str(self._axis_combo.currentData()),
+            "gamma": float(self._gamma_spin.value()) if self._gamma_spin is not None else 1.8,
         }
         if gm_type == "general":
             target = target_or_warn(self, self._target_service, "人工波生成")
@@ -299,6 +314,7 @@ class ArtificialTool(ToolWidget):
                 code_sa=ctx["code_sa"],
                 region=ctx["region"],
                 axis=ctx["axis"],
+                gamma=ctx["gamma"],
             )
         progress_cb(95, "写入信号库…")
         return {"sig": sig, "gm_type": gm_type}
@@ -338,6 +354,10 @@ class ArtificialTool(ToolWidget):
             getattr(sig, "near_field_factor", 1.0)
         )
         meta["pulse"] = bool(getattr(sig, "pulse_params", None) is not None)
+        pulse_params = getattr(sig, "pulse_params", None)
+        if pulse_params is not None:
+            meta["pulse_gamma"] = float(getattr(pulse_params, "gamma", 1.8))
+            meta["pulse_Tp"] = float(getattr(pulse_params, "Tp", 0.0))
         if hasattr(sig, "pulse_metrics") and getattr(sig, "pulse_metrics"):
             meta["pulse_metrics"] = dict(sig.pulse_metrics)
         if hasattr(sig, "spectrum_periods") and hasattr(sig, "total_spectrum"):
@@ -377,6 +397,7 @@ class ArtificialTool(ToolWidget):
             "gmpe": self._gmpe_check.isChecked(),
             "region": self._region_combo.currentData(),
             "axis": self._axis_combo.currentData(),
+            "gamma": self._gamma_spin.value() if self._gamma_spin is not None else 1.8,
         }
 
     def restore_state(self, state: dict[str, object] | None) -> None:
@@ -419,4 +440,6 @@ class ArtificialTool(ToolWidget):
         self._r_spin.setValue(float(state.get("R", 10.0)))
         self._vs30_spin.setValue(float(state.get("Vs30", 760.0)))
         self._gmpe_check.setChecked(bool(state.get("gmpe", False)))
+        if self._gamma_spin is not None:
+            self._gamma_spin.setValue(float(state.get("gamma", 1.8)))
         self._refresh_mode_ui()
