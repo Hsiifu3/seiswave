@@ -34,6 +34,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
+      - name: 下载内置地震动库(如已托管)
+        shell: bash
+        run: |
+          mkdir -p seiswave/data/builtin_db
+          gh release download builtin-db-v1 -D seiswave/data/builtin_db \
+            -p "waveforms.npz" -p "spectra_z0.05.npz" -p "index.json" \
+            || echo "内置库未托管,安装包将不含内置库(可后续补)"
+        env:
+          GH_TOKEN: ${{ github.token }}
       - name: PyInstaller 打包 (.app)
         run: python -m PyInstaller build.spec --noconfirm --clean
       - name: 生成 .dmg 磁盘镜像
@@ -67,6 +76,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
+      - name: 下载内置地震动库(如已托管)
+        shell: bash
+        run: |
+          mkdir -p seiswave/data/builtin_db
+          gh release download builtin-db-v1 -D seiswave/data/builtin_db \
+            -p "waveforms.npz" -p "spectra_z0.05.npz" -p "index.json" \
+            || echo "内置库未托管,安装包将不含内置库(可后续补)"
+        env:
+          GH_TOKEN: ${{ github.token }}
       - name: PyInstaller 打包 (onedir)
         run: python -m PyInstaller build.spec --noconfirm --clean
       - name: 安装 Inno Setup
