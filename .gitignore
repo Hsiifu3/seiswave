@@ -52,3 +52,7 @@ coverage.xml
 /init_art_wave_*.md
 /CLAUDE_CODE_BRIEF.md
 
+
+# 内置地震动库数据(体积大,由 Release 资产托管 + CI 下载打包,不进 git)
+seiswave/data/builtin_db/*.npz
+seiswave/data/builtin_db/*.json
