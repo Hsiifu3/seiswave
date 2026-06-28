@@ -99,6 +99,9 @@ class AutoSelectTool(ToolWidget):
         form = QFormLayout()
 
         self._source_combo = QComboBox()
+        from seiswave.core.builtin_db import BuiltinDatabase
+        if BuiltinDatabase.is_available():
+            self._source_combo.addItem("内置库", "builtin")
         self._source_combo.addItem("PEER 目录", "peer")
         self._source_combo.addItem("已导入候选", "pool")
         self._source_combo.currentIndexChanged.connect(self._refresh_source_ui)
@@ -225,7 +228,7 @@ class AutoSelectTool(ToolWidget):
                 "Vs30": float(self._vs30_spin.value()),
             },
         }
-        if source != "peer":
+        if source == "pool":
             source_records = [
                 record
                 for record in (self._pool.selection() or self._pool.all())
@@ -240,7 +243,13 @@ class AutoSelectTool(ToolWidget):
 
     def _compute(self, ctx, progress_cb, is_cancelled):
         periods = ctx["periods"]
-        if ctx["source"] == "peer":
+        source = ctx["source"]
+        if source == "builtin":
+            progress_cb(15, "加载内置库…")
+            from seiswave.core.builtin_db import BuiltinDatabase
+            database = BuiltinDatabase().load()
+            source_label = "builtin"
+        elif source == "peer":
             database = self._load_peer_database(
                 ctx["peer_path"], periods, ctx["zeta"], progress_cb, is_cancelled
             )

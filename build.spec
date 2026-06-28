@@ -26,6 +26,10 @@ def _existing_data_entries() -> list[tuple[str, str]]:
         (ROOT / "LICENSE", "."),
         (ROOT / "seiswave" / "gui" / "styles" / "theme.qss", "seiswave/gui/styles"),
     ]
+    # 内置地震动库(体积大、由 CI 下载到位;存在才打包)
+    builtin = ROOT / "seiswave" / "data" / "builtin_db"
+    for fname in ("waveforms.npz", "spectra_z0.05.npz", "index.json"):
+        candidates.append((builtin / fname, "seiswave/data/builtin_db"))
     return [(str(path), target) for path, target in candidates if path.exists()]
 
 
@@ -59,6 +63,7 @@ HIDDEN_IMPORTS = [
     "PySide6.QtWidgets",
     "seiswave",
     "seiswave.core",
+    "seiswave.core.builtin_db",
     "seiswave.core.code_spec",
     "seiswave.core.combiner",
     "seiswave.core.fft",
