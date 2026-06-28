@@ -313,6 +313,17 @@ class PreviewPanel(QWidget):
         if len(axes) == 1:
             axis = axes[0]
             axis.set_title("反应谱对比", fontsize=10)
+            n_rec = len(records)
+            # 各条记录谱(淡色细线,衬于底层);仅单阻尼且多于1条时显示,避免杂乱
+            if len(zetas) == 1 and n_rec > 1:
+                for j, record in enumerate(records):
+                    sa_j = record.spectrum(periods, zeta=base_zeta).sa
+                    axis.plot(
+                        periods, sa_j,
+                        color=colors["grid"], linewidth=0.6, alpha=0.5,
+                        label="各记录谱" if j == 0 else "_nolegend_",
+                        zorder=1,
+                    )
             if target_sa.size:
                 axis.plot(
                     periods,
@@ -321,17 +332,23 @@ class PreviewPanel(QWidget):
                     linewidth=2.0,
                     linestyle="--",
                     label="目标谱",
+                    zorder=3,
                 )
             for index, zeta in enumerate(zetas):
                 mean_spec = spectra_by_zeta.get(zeta)
                 if mean_spec is None:
                     continue
+                if len(zetas) == 1:
+                    lbl = f"平均谱（{n_rec} 条）" if n_rec > 1 else "反应谱"
+                else:
+                    lbl = f"平均谱 ζ={self._format_zeta(zeta)}"
                 axis.plot(
                     periods,
                     mean_spec["sa"],
                     color=palette[index % len(palette)],
-                    linewidth=1.6,
-                    label=f"结果谱 ζ={self._format_zeta(zeta)}",
+                    linewidth=1.8,
+                    label=lbl,
+                    zorder=2,
                 )
             axis.legend(fontsize=8, framealpha=0.85, loc="best")
             self._spectrum_plot.refresh()
