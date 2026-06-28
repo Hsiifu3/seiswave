@@ -238,6 +238,7 @@ class WaveSelector:
         sa_sum = np.zeros(len(cfg.periods))
         used = set()
         used_rsns = set()
+        used_events = set()  # 事件多样性:尽量不选同一地震事件
 
         # 合并主周期和隔震周期索引用于额外惩罚
         all_T_indices = self._T_indices
@@ -245,8 +246,10 @@ class WaveSelector:
             all_T_indices = np.concatenate([self._T_indices, self._T_iso_indices])
 
         for step in range(n):
-            best_idx = -1
+            best_idx = -1            # 来自未用过事件的最优
             best_score = 1e30
+            best_idx_any = -1        # 退路:允许同事件
+            best_score_any = 1e30
 
             for i, cand in enumerate(candidates):
                 if i in used:
@@ -279,16 +282,29 @@ class WaveSelector:
                         key_err = np.max(np.abs(m_vals[valid] - t_vals[valid]) / t_vals[valid])
                         err += key_err * 0.5
 
+                if err < best_score_any:
+                    best_score_any = err
+                    best_idx_any = i
+
+                # 事件多样性:优先未用过的事件(event 为空则不限制)
+                ev = (getattr(cand.record, "event", "") or "").strip().upper()
+                if ev and ev in used_events:
+                    continue
                 if err < best_score:
                     best_score = err
                     best_idx = i
 
-            if best_idx < 0:
+            # 优先取不同事件的最优;若没有未用事件可选,退而取整体最优
+            chosen = best_idx if best_idx >= 0 else best_idx_any
+            if chosen < 0:
                 break
 
-            used.add(best_idx)
-            cand = candidates[best_idx]
+            used.add(chosen)
+            cand = candidates[chosen]
             used_rsns.add(cand.record.rsn)
+            ev = (getattr(cand.record, "event", "") or "").strip().upper()
+            if ev:
+                used_events.add(ev)
             selected.append(cand)
             sa_sum += cand.record.sa[period_map] * cand.scale_factor
 

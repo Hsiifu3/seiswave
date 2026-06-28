@@ -425,20 +425,28 @@ class AutoSelectTool(ToolWidget):
         return specs
 
     def _peer_record_name(self, record: PeerRecord, index: int) -> str:
-        base = Path(record.filepath).stem if record.filepath else f"RSN{record.rsn}"
+        # filepath/id 本身即"事件-台站-分量",直接作友好名
+        base = Path(record.filepath).stem if record.filepath else ""
+        if base:
+            return base
         if record.event:
-            return f"{base}_{record.event}"
-        return f"{base}_{index}"
+            return f"{record.event}_{record.station}_{index}"
+        return f"REC{index}"
 
     def _result_meta(self, result, source_label: str, scenario: dict) -> dict[str, object]:
+        rec = result.record
         return {
             "source": "auto_select",
             "operation": "auto_select",
             "selector_source": source_label,
-            "rsn": int(result.record.rsn),
-            "event": result.record.event,
-            "station": result.record.station,
-            "component": result.record.component,
+            "record_id": str(rec.filepath or ""),
+            "event": rec.event,
+            "date": getattr(rec, "date", ""),
+            "station": rec.station,
+            "component": rec.component,
+            "pga": float(rec.pga),
+            "rec_dt": float(rec.dt),
+            "eff_duration": float(rec.eff_duration),
             "scale_factor": float(result.scale_factor),
             "match_rmse": float(result.match_error),
             "deviations": {str(k): float(v) for k, v in result.deviations.items()},

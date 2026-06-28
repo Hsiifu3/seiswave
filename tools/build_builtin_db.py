@@ -35,6 +35,24 @@ from seiswave.core.spectrum import Spectra   # noqa: E402
 _VERT = re.compile(r"(-?UP|-?UD|-?V|-?Z|VERT)$", re.IGNORECASE)
 
 
+def _parse_header2(h2: str, rid: str) -> dict:
+    """从 PEER AT2 第二行解析 事件/日期/台站/分量(格式不统一,稳健提取)。"""
+    parts = [p.strip() for p in h2.split(",")]
+    m = re.search(r"\d{1,2}/\d{1,2}/\d{2,4}", h2)
+    date = m.group(0) if m else ""
+    ev = re.match(
+        r"^([A-Za-z][A-Za-z0-9\s\-\.&/]*?)(?=\s*\d{1,2}/|\s+\d{4}\b|\s+\d{2}:\d{2}|$)",
+        parts[0],
+    )
+    event = (ev.group(1) if ev else parts[0]).strip()
+    event = re.sub(r"\s+EQ\.?$", "", event).strip() or parts[0]
+    station = parts[-2].strip() if len(parts) >= 2 else ""
+    comp = re.split(r"[(]", parts[-1])[0].strip() if parts else ""
+    if not comp and "-" in rid:
+        comp = rid.split("-")[-1]
+    return {"event": event, "date": date, "station": station, "component": comp}
+
+
 def _is_horizontal(name: str) -> bool:
     stem = Path(name).stem
     if not name.lower().endswith((".at2",)):
@@ -92,11 +110,13 @@ def main(zip_path: str, out_dir: str | None = None, limit: int = 0) -> None:
                 sp = Spectra.compute(acc, rec.dt, periods, zeta=0.05)
 
                 meta = rec.metadata or {}
+                prov = _parse_header2(str(meta.get("header2", "")), rid)
                 index[rid] = {
                     "id": rid,
-                    "event": meta.get("header2", "").strip()[:60] or rid.split("-")[0],
-                    "station": meta.get("station", ""),
-                    "component": rid.split("-")[-1] if "-" in rid else "",
+                    "event": prov["event"],
+                    "date": prov["date"],
+                    "station": prov["station"],
+                    "component": prov["component"],
                     "dt": float(rec.dt),
                     "npts": int(acc.size),
                     "pga": peak,

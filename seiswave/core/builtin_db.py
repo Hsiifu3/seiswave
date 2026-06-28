@@ -79,6 +79,7 @@ class BuiltinDatabase:
                     rsn=i + 1,
                     event=str(meta.get("event", "")),
                     station=str(meta.get("station", "")),
+                    date=str(meta.get("date", "")),
                     component=str(meta.get("component", "")),
                     direction="H",
                     filepath=rid,  # 用 id 作为波形键
